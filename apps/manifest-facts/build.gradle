@@ -1,0 +1,19 @@
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation project(':common')
+    implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"
+    annotationProcessor "info.picocli:picocli-codegen:${rootProject.ext.picocliVersion}"
+
+    // SLF4J facade for boundary logging (see docs/superpowers/reference logging conventions).
+    implementation "org.slf4j:slf4j-api:${rootProject.ext.slf4jVersion}"
+    // Concrete binding for CLI/standalone runs.
+    runtimeOnly "org.slf4j:slf4j-simple:${rootProject.ext.slf4jVersion}"
+}
+
+application {
+    mainClass = 'com.oversecured.sast.manifestfacts.ManifestFactsCommand'
+    applicationName = 'mfacts'
+}

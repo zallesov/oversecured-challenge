@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="oversecured.deeplink">
+    <application>
+        <activity android:name=".DeeplinkActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="oversecured" android:host="ovaa" />
+                <data android:scheme="https" android:host="example.com" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

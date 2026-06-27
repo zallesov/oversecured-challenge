@@ -1,0 +1,6 @@
+rootProject.name = 'android-taint-sast'
+
+include 'common'
+include 'apps:decompiler'
+include 'apps:parser'
+include 'apps:manifest-facts'

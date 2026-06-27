@@ -1,0 +1,35 @@
+ext {
+    junitVersion = '5.10.2'
+    assertjVersion = '3.25.3'
+    jacksonVersion = '2.17.1'
+    slf4jVersion = '2.0.13'
+    picocliVersion = '4.7.6'
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    group = 'com.oversecured.sast'
+    version = '0.1.0'
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(17)
+        }
+    }
+
+    repositories {
+        mavenCentral()
+        google()  // jadx transitive deps (aapt2-proto, smali) are published here
+    }
+
+    dependencies {
+        testImplementation "org.junit.jupiter:junit-jupiter:${rootProject.ext.junitVersion}"
+        testImplementation "org.assertj:assertj-core:${rootProject.ext.assertjVersion}"
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+
+    tasks.named('test') {
+        useJUnitPlatform()
+    }
+}
