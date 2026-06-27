@@ -49,6 +49,7 @@ public final class IntraProceduralAnalyzer {
     private final Rule rule;
     private final List<MethodSummary> summaries;
     private final java.util.Map<String, MethodSummary> summaryBySignature;
+    private final com.oversecured.sast.taint.icc.IccModel icc;
 
     private List<CandidateFinding> findings;
     private String currentComponent;
@@ -56,10 +57,17 @@ public final class IntraProceduralAnalyzer {
 
     public IntraProceduralAnalyzer(AstIndex index, RuleMatcher matcher, Rule rule,
                                    List<MethodSummary> summaries) {
+        this(index, matcher, rule, summaries, null);
+    }
+
+    public IntraProceduralAnalyzer(AstIndex index, RuleMatcher matcher, Rule rule,
+                                   List<MethodSummary> summaries,
+                                   com.oversecured.sast.taint.icc.IccModel icc) {
         this.index = index;
         this.matcher = matcher;
         this.rule = rule;
         this.summaries = List.copyOf(summaries);
+        this.icc = icc;
         java.util.Map<String, MethodSummary> map = new java.util.HashMap<>();
         for (MethodSummary s : this.summaries) {
             map.put(s.canonicalMethodSignature(), s);
@@ -296,7 +304,10 @@ public final class IntraProceduralAnalyzer {
             }
         }
         if (matcher.sourceFor(resolved).isPresent()) {
-            return Optional.of(new FlowTrace().addStep(step(mce, "source: " + mce)));
+            Optional<FlowTrace> iccTrace = iccSource(mce);
+            return iccTrace.isPresent()
+                    ? iccTrace
+                    : Optional.of(new FlowTrace().addStep(step(mce, "source: " + mce)));
         }
         if (matcher.isPropagator(resolved)) {
             List<Optional<FlowTrace>> inputs = new ArrayList<>(argTraces);
@@ -325,6 +336,25 @@ public final class IntraProceduralAnalyzer {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * If the current component receives a tainted Intent extra under {@code key} via ICC, return an
+     * ICC-augmented source trace (carrying the cross-component {@code putExtra + startActivity} step)
+     * instead of a plain in-component source. Returns empty when no active ICC flow applies.
+     */
+    private Optional<FlowTrace> iccSource(MethodCallExpr mce) {
+        if (icc == null || currentComponent == null || mce.getArguments().isEmpty()) {
+            return Optional.empty();
+        }
+        if (!(mce.getArgument(0) instanceof StringLiteralExpr keyLit)) {
+            return Optional.empty();
+        }
+        String key = keyLit.getValue();
+        return icc.activeSource(currentComponent, key).map(flow ->
+                new FlowTrace()
+                        .addStep(flow.putExtraStep())
+                        .addStep(step(mce, "source (via ICC): " + mce.getNameAsString() + "(\"" + key + "\")")));
     }
 
     protected void emitFinding(FlowTrace argTrace, Node sink) {
