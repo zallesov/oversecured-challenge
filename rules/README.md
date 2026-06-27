@@ -9,6 +9,10 @@ Part of the [Android Taint SAST Pipeline](../docs/superpowers/specs/2026-06-27-a
 |------|--------|---------------------|
 | `webview.yaml` | step 4 `taint` | Intent/deeplink data → `WebView.loadUrl` (open redirect / XSS, CWE-601) — **the primary target class**. |
 | `pathtraversal.yaml` | step 4 `taint` | Uri path segment → file open (path traversal, CWE-22) — second class on the **same** engine, proving rules are config not code. |
+| `intent-redirect.yaml` | step 4 `taint` | `getParcelableExtra` nested Intent → `startActivity` (Intent redirection, CWE-927). |
+| `file-theft.yaml` | step 4 `taint` | `ACTION_PICK` result `Intent.getData()` Uri → `FileUtils.copyToCache` (file theft, CWE-200). |
+| `login-url-injection.yaml` | step 4 `taint` | deeplink `getQueryParameter("url")` → `LoginUtils.setLoginUrl` (untrusted endpoint override, CWE-601). |
+| `credential-log-leak.yaml` | step 4 `taint` | credentials → `android.util.Log` (sensitive data in logcat, CWE-532). |
 | `misconfig.yaml` | step 5 `manifest-misconfig` | Manifest misconfigurations (exported without permission, provider grantUriPermissions, weak host validation). |
 
 ## Format (taint rules)
@@ -35,7 +39,13 @@ rules:
 Signature grammar: `<fully.qualified.Class: ReturnType methodName(ParamType,...)>` (inner classes use `$`).
 
 ## Adding a vulnerability class
-Drop a new YAML file here and add it to the orchestrator `analysisPlan`. No engine code changes — that is the whole point.
+Drop a new YAML file here. The orchestrator runs every rule in this directory by default
+(`start-analysis --rules all`, the default), so no code change is needed — that is the whole point.
+The file's base name **is** the rule name: `rules/foo.yaml` → rule `foo` → findings key
+`findings-foo.json`.
+
+Select a subset with `--rules foo,bar` (comma/space separated). `misconfig` is reserved for the
+manifest-misconfig analyzer (its own branch) and is excluded from the taint `all` set.
 
 ## Notes
 Full schema and rationale in spec §5. The engine is policy-agnostic; all detection lives here.

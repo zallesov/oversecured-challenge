@@ -16,14 +16,15 @@ class StartAnalysisCommandTest {
         int exit = new CommandLine(new StartAnalysisCommand(starter)).execute(
                 "--apk", "/tmp/ovaa.apk",
                 "--run-id", "ovaa-001",
-                "--temporal", "127.0.0.1:7233");
+                "--temporal", "127.0.0.1:7233",
+                "--rules", "webview,pathtraversal");
 
         assertThat(exit).isEqualTo(0);
         assertThat(starter.target).isEqualTo("127.0.0.1:7233");
         assertThat(starter.workflowId).isEqualTo("android-sast-ovaa-001");
         assertThat(starter.requests).containsExactly(new AnalyzeApkRequest(
                 "/tmp/ovaa.apk",
-                AnalysisPlan.defaultPlan("ovaa-001")));
+                AnalysisPlan.forRules("ovaa-001", List.of("webview", "pathtraversal"))));
     }
 
     @Test
@@ -31,7 +32,8 @@ class StartAnalysisCommandTest {
         RecordingStarter starter = new RecordingStarter();
         int exit = new CommandLine(new StartAnalysisCommand(starter)).execute(
                 "--apk", "/tmp/ovaa.apk",
-                "--run-id", "../escape");
+                "--run-id", "../escape",
+                "--rules", "webview");
 
         assertThat(exit).isNotEqualTo(0);
         assertThat(starter.requests).isEmpty();

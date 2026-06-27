@@ -71,14 +71,19 @@ public final class TaintAnalyzer {
     }
 
     public FindingsDoc analyze(AstIndex index, ManifestFacts facts, Rule rule) {
+        // Scope analysis to the app's own package (from manifest facts); bundled library code that a
+        // decompiled apk inlines (androidx/kotlin/com.google/android.*) is skipped from the walk but
+        // still backs type resolution. Blank package = analyze everything (source-tree fixtures).
+        String appRoot = facts.packageName();
+
         RuleMatcher matcher = RuleMatcher.forRule(rule);
-        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule).compute();
-        IccModel icc = IccModel.collect(index, matcher, rule);
+        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule, appRoot).compute();
+        IccModel icc = IccModel.collect(index, matcher, rule, appRoot);
         IntraProceduralAnalyzer analyzer = new IntraProceduralAnalyzer(index, matcher, rule, summaries, icc);
 
         ReachabilityFilter reachability = new ReachabilityFilter(facts);
         List<CandidateFinding> candidates = new ArrayList<>();
-        for (var cu : index.units()) {
+        for (var cu : index.units(appRoot)) {
             for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
                 for (CandidateFinding c : analyzer.analyzeMethod(method)) {
                     if (!reachability.keep(c, rule.getManifestConditions())) {

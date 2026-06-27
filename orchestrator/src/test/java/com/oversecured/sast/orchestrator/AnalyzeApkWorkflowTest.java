@@ -42,7 +42,8 @@ class AnalyzeApkWorkflowTest {
         AnalyzeApkWorkflow workflow = newWorkflow(activities);
 
         AnalysisResult result = workflow.analyze(
-                new AnalyzeApkRequest("/tmp/ovaa.apk", AnalysisPlan.defaultPlan("run-1")));
+                new AnalyzeApkRequest("/tmp/ovaa.apk",
+                        AnalysisPlan.forRules("run-1", List.of("webview", "pathtraversal"))));
 
         assertThat(result).isEqualTo(new AnalysisResult(
                 "runs/run-1/report.html",
@@ -70,7 +71,8 @@ class AnalyzeApkWorkflowTest {
         AnalyzeApkWorkflow workflow = newWorkflow(activities);
 
         AnalysisResult result = workflow.analyze(
-                new AnalyzeApkRequest("/tmp/ovaa.apk", AnalysisPlan.defaultPlan("fanout-1")));
+                new AnalyzeApkRequest("/tmp/ovaa.apk",
+                        AnalysisPlan.forRules("fanout-1", List.of("webview", "pathtraversal"))));
 
         assertThat(result.htmlReportKey()).isEqualTo("runs/fanout-1/report.html");
         assertThat(activities.parseAndFactsWereConcurrentlyStarted).isTrue();

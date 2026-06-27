@@ -25,15 +25,17 @@ public final class SummaryComputer {
     private final AstIndex index;
     private final RuleMatcher matcher;
     private final Rule rule;
+    private final String appRoot;
 
-    public SummaryComputer(AstIndex index, RuleMatcher matcher, Rule rule) {
+    public SummaryComputer(AstIndex index, RuleMatcher matcher, Rule rule, String appRoot) {
         this.index = index;
         this.matcher = matcher;
         this.rule = rule;
+        this.appRoot = appRoot;
     }
 
     public List<MethodSummary> compute() {
-        List<MethodDeclaration> methods = index.units().stream()
+        List<MethodDeclaration> methods = index.units(appRoot).stream()
                 .flatMap(cu -> cu.findAll(MethodDeclaration.class).stream())
                 .toList();
 
@@ -47,9 +49,10 @@ public final class SummaryComputer {
                     continue;
                 }
                 Set<Integer> returnTainted = computeReturnTaint(method, known);
-                next.put(sig, new MethodSummary(sig, returnTainted, Set.of()));
+                Set<Integer> sinkReaching = computeSinkReaching(method, known);
+                next.put(sig, new MethodSummary(sig, returnTainted, Set.of(), sinkReaching));
             }
-            boolean changed = !sameReturnTaint(current, next);
+            boolean changed = !sameSummaries(current, next);
             current = next;
             if (!changed) {
                 break;
@@ -69,13 +72,26 @@ public final class SummaryComputer {
         return tainting;
     }
 
-    private static boolean sameReturnTaint(Map<String, MethodSummary> a, Map<String, MethodSummary> b) {
+    private Set<Integer> computeSinkReaching(MethodDeclaration method, List<MethodSummary> known) {
+        Set<Integer> reaching = new LinkedHashSet<>();
+        IntraProceduralAnalyzer analyzer = new IntraProceduralAnalyzer(index, matcher, rule, known);
+        for (int i = 0; i < method.getParameters().size(); i++) {
+            if (analyzer.reachesSinkForParam(method, i)) {
+                reaching.add(i);
+            }
+        }
+        return reaching;
+    }
+
+    private static boolean sameSummaries(Map<String, MethodSummary> a, Map<String, MethodSummary> b) {
         if (!a.keySet().equals(b.keySet())) {
             return false;
         }
         for (String key : a.keySet()) {
-            if (!a.get(key).returnTaintedIfParamsTainted()
-                    .equals(b.get(key).returnTaintedIfParamsTainted())) {
+            MethodSummary x = a.get(key);
+            MethodSummary y = b.get(key);
+            if (!x.returnTaintedIfParamsTainted().equals(y.returnTaintedIfParamsTainted())
+                    || !x.sinkReachingParams().equals(y.sinkReachingParams())) {
                 return false;
             }
         }
@@ -96,8 +112,11 @@ public final class SummaryComputer {
                     + ": " + decl.getReturnType().describe()
                     + " " + decl.getName()
                     + "(" + params + ")>";
-        } catch (RuntimeException e) {
-            return null; // unresolved project method: no summary
+        } catch (RuntimeException | StackOverflowError e) {
+            // Unresolved project method: no summary. StackOverflowError guarded because the symbol
+            // solver can infinite-loop on recursive generic bounds (androidx + android.jar); that
+            // method just gets no summary instead of aborting the whole analysis (fail-soft).
+            return null;
         }
     }
 }

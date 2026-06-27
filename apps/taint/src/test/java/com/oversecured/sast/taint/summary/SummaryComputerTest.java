@@ -35,11 +35,37 @@ class SummaryComputerTest {
     void summaryCarriesTaintThroughHelperReturnOnlyWhenHelperReturnsParam() {
         AstIndex index = AstIndex.build(Path.of("src/test/resources/fixtures/taint-src/summary"));
         RuleMatcher matcher = RuleMatcher.forRule(rule());
-        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule()).compute();
+        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule(), null).compute();
 
         assertThat(new IntraProceduralAnalyzer(index, matcher, rule(), summaries)
                 .analyzeMethod(method(index, "throughHelper"))).hasSize(1);
         assertThat(new IntraProceduralAnalyzer(index, matcher, rule(), summaries)
                 .analyzeMethod(method(index, "throughCleanHelper"))).isEmpty();
+    }
+
+    @Test
+    void crossMethodTaintedArgReachingCalleeSinkProducesFinding() {
+        AstIndex index = AstIndex.build(Path.of("src/test/resources/fixtures/taint-src/summary"));
+        RuleMatcher matcher = RuleMatcher.forRule(rule());
+        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule(), null).compute();
+
+        // The callee sinks its first parameter, so it is recorded as sink-reaching.
+        assertThat(summaries.stream()
+                .filter(s -> s.canonicalMethodSignature().contains("sinkHelper"))
+                .findFirst().orElseThrow().sinkReachingParams()).contains(0);
+
+        // Caller passing a tainted argument into that callee yields a finding.
+        assertThat(new IntraProceduralAnalyzer(index, matcher, rule(), summaries)
+                .analyzeMethod(method(index, "crossMethodSink"))).hasSize(1);
+    }
+
+    @Test
+    void crossMethodTaintedArgIntoNonSinkingCalleeProducesNoFinding() {
+        AstIndex index = AstIndex.build(Path.of("src/test/resources/fixtures/taint-src/summary"));
+        RuleMatcher matcher = RuleMatcher.forRule(rule());
+        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule(), null).compute();
+
+        assertThat(new IntraProceduralAnalyzer(index, matcher, rule(), summaries)
+                .analyzeMethod(method(index, "crossMethodNoSink"))).isEmpty();
     }
 }

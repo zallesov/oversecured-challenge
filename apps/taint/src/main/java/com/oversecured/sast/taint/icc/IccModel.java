@@ -3,6 +3,7 @@ package com.oversecured.sast.taint.icc;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.AssignExpr;
+import com.github.javaparser.ast.expr.CastExpr;
 import com.github.javaparser.ast.expr.ClassExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
@@ -53,9 +54,9 @@ public final class IccModel {
                 .findFirst();
     }
 
-    public static IccModel collect(AstIndex index, RuleMatcher matcher, Rule rule) {
+    public static IccModel collect(AstIndex index, RuleMatcher matcher, Rule rule, String appRoot) {
         List<IntentExtraFlow> flows = new ArrayList<>();
-        for (var cu : index.units()) {
+        for (var cu : index.units(appRoot)) {
             for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
                 collectFromMethod(index, matcher, method, flows);
             }
@@ -156,13 +157,28 @@ public final class IccModel {
         return oce.getType().getNameAsString().equals("Intent") && oce.getArguments().size() >= 2;
     }
 
+    /** Peel any number of nested cast expressions, e.g. jadx's {@code (Class<?>) X.class}. */
+    private static Expression unwrapCasts(Expression expr) {
+        Expression e = expr;
+        while (e instanceof CastExpr cast) {
+            e = cast.getExpression();
+        }
+        return e;
+    }
+
     private static Optional<String> targetOf(ObjectCreationExpr oce) {
-        if (!(oce.getArgument(1) instanceof ClassExpr ce)) {
+        // jadx decompiles `new Intent(this, X.class)` as `new Intent(this, (Class<?>) X.class)` — the
+        // class arg is wrapped in an explicit cast that hand-written source omits. Unwrap casts so
+        // the ICC target resolves on decompiled apk input, not only on raw source.
+        Expression arg = unwrapCasts(oce.getArgument(1));
+        if (!(arg instanceof ClassExpr ce)) {
             return Optional.empty();
         }
         try {
             return Optional.of(ce.getType().resolve().describe());
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | StackOverflowError e) {
+            // Fail-soft: fall back to the textual type name when the symbol solver cannot resolve
+            // (or infinite-loops on recursive generic bounds, androidx + android.jar).
             return Optional.of(ce.getType().toString());
         }
     }

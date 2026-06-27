@@ -7,6 +7,7 @@ import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.JarTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import com.github.javaparser.utils.SourceRoot;
@@ -20,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,10 +46,12 @@ public final class AstIndex {
     private static final String FN_LOAD = "📂"; // 📂
 
     private final Path sourcesDir;
+    private final List<Path> classpath;
     private final List<CompilationUnit> units;
 
-    private AstIndex(Path sourcesDir, List<CompilationUnit> units) {
+    private AstIndex(Path sourcesDir, List<Path> classpath, List<CompilationUnit> units) {
         this.sourcesDir = sourcesDir;
+        this.classpath = List.copyOf(classpath);
         this.units = List.copyOf(units);
     }
 
@@ -59,12 +63,40 @@ public final class AstIndex {
      * throws on broken individual files or unresolved Android types (error-handling conventions §4).
      */
     public static AstIndex build(Path sourcesDir) {
+        return build(sourcesDir, List.of());
+    }
+
+    /**
+     * Parse with extra resolution classpath. Each entry is a {@code .jar} (e.g. the Android SDK
+     * {@code android.jar}) added as a {@link JarTypeSolver}, so SymbolSolver can resolve calls into
+     * library types ({@code WebView.loadUrl}, {@code Intent.getStringExtra}) that are referenced but
+     * not defined in {@code sourcesDir}. Without this, every Android SDK call is unresolved and the
+     * signature matcher never matches a source/sink. A jar that cannot be opened is recorded as a
+     * recoverable {@link Diagnostics} entry and skipped (fail-soft).
+     */
+    public static AstIndex build(Path sourcesDir, List<Path> classpath) {
         Path root = sourcesDir.toAbsolutePath().normalize();
-        log.info("{} ▶️ build ast-index from {}", FN_BUILD, root); // ▶️
+        log.info("{} ▶️ build ast-index from {} (classpath: {} jar(s))",
+            FN_BUILD, root, classpath.size()); // ▶️
 
         CombinedTypeSolver typeSolver = new CombinedTypeSolver();
         typeSolver.add(new ReflectionTypeSolver());
         typeSolver.add(new JavaParserTypeSolver(root));
+
+        List<Path> resolvedClasspath = new ArrayList<>();
+        Diagnostics solverDiag = new Diagnostics();
+        for (Path jar : classpath) {
+            Path jarPath = jar.toAbsolutePath().normalize();
+            try {
+                typeSolver.add(new JarTypeSolver(jarPath));
+                resolvedClasspath.add(jarPath);
+            } catch (IOException e) {
+                // A missing/unreadable jar is environmental, not fatal: drop it and keep resolving
+                // whatever else we can (fail-soft, error-handling conventions §4).
+                solverDiag.add(jarPath.toString(), "classpath jar skipped: " + e.getMessage());
+                log.warn("{} ⚠️ skipped classpath jar {} ({})", FN_BUILD, jarPath, e.getMessage());
+            }
+        }
 
         ParserConfiguration config = new ParserConfiguration()
             .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17)
@@ -92,11 +124,36 @@ public final class AstIndex {
             log.warn("{} ⚠️ skipped {} unparseable file(s)", FN_BUILD, diagnostics.count()); // ⚠️
         }
         log.info("{} ✅ parsed {} compilation unit(s)", FN_BUILD, units.size()); // ✅
-        return new AstIndex(root, units);
+        return new AstIndex(root, resolvedClasspath, units);
     }
 
     public List<CompilationUnit> units() {
         return units;
+    }
+
+    /**
+     * Units whose package is, or is nested under, {@code rootPackage} — the app's own code. Used to
+     * scope analysis to the application and skip bundled library code (androidx, kotlin, com.google,
+     * android.*) that a decompiled apk inlines: those carry no app vuln, balloon the work ~100x, and
+     * make the symbol solver infinite-loop on recursive generic bounds. The full tree still backs
+     * type resolution (the solver is unchanged) — only the analyzed set shrinks. A null/blank root
+     * disables scoping and returns every unit (back-compat for fixtures with no package).
+     */
+    public List<CompilationUnit> units(String rootPackage) {
+        if (rootPackage == null || rootPackage.isBlank()) {
+            return units;
+        }
+        String prefix = rootPackage + ".";
+        List<CompilationUnit> scoped = new ArrayList<>();
+        for (CompilationUnit cu : units) {
+            String pkg = cu.getPackageDeclaration()
+                .map(pd -> pd.getNameAsString())
+                .orElse("");
+            if (pkg.equals(rootPackage) || pkg.startsWith(prefix)) {
+                scoped.add(cu);
+            }
+        }
+        return scoped;
     }
 
     Path sourcesDir() {
@@ -116,10 +173,15 @@ public final class AstIndex {
     public void save(Path indexDir) {
         try {
             Files.createDirectories(indexDir);
+            List<String> classpathStrings = new ArrayList<>();
+            for (Path jar : classpath) {
+                classpathStrings.add(jar.toString());
+            }
             IndexMeta meta = new IndexMeta(
                 IndexMeta.CURRENT_VERSION,
                 sourcesDir.toString(),
-                ParserConfiguration.LanguageLevel.JAVA_17.name());
+                ParserConfiguration.LanguageLevel.JAVA_17.name(),
+                classpathStrings);
             // Shared ObjectMapper (INDENT_OUTPUT enabled) so every artifact serializes uniformly.
             Json.mapper().writeValue(indexDir.resolve("index-meta.json").toFile(), meta);
             log.info("{} 📁 wrote ast-index descriptor to {}", FN_SAVE, indexDir); // 📁
@@ -138,7 +200,11 @@ public final class AstIndex {
         try {
             IndexMeta meta = Json.mapper().readValue(
                 indexDir.resolve("index-meta.json").toFile(), IndexMeta.class);
-            return build(Path.of(meta.sourcesDir()));
+            List<Path> classpath = new ArrayList<>();
+            for (String jar : meta.classpath()) {
+                classpath.add(Path.of(jar));
+            }
+            return build(Path.of(meta.sourcesDir()), classpath);
         } catch (IOException e) {
             throw new ParserException(FailureKind.PERMANENT,
                 "failed to read ast-index from " + indexDir + " (" + e.getMessage() + ")", e);
@@ -155,8 +221,13 @@ public final class AstIndex {
         try {
             ResolvedMethodDeclaration decl = call.resolve();
             return Optional.of(toFlowDroidSignature(decl));
-        } catch (RuntimeException e) {
-            // UnsolvedSymbolException and any resolver failure -> fail-soft.
+        } catch (RuntimeException | StackOverflowError e) {
+            // UnsolvedSymbolException and any resolver failure -> fail-soft. StackOverflowError is
+            // included on purpose: JavaSymbolSolver can infinite-loop on recursive generic bounds
+            // (e.g. androidx wildcards/type-variables) when resolving against android.jar; that one
+            // call must fail-soft like any other unresolved type rather than abort the whole run
+            // (spec §6.1 noclasspath fail-soft; error-handling conventions §4). The JVM unwinds the
+            // recursive frames cleanly, so analysis of every other call site continues.
             return Optional.empty();
         }
     }

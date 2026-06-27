@@ -14,6 +14,8 @@ import picocli.CommandLine.Spec;
 import picocli.CommandLine.Model.CommandSpec;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 
 @Command(
@@ -33,14 +35,19 @@ public final class ParseCommand implements Callable<Integer> {
     @Option(names = "--out", required = true, description = "Output ast-index/ directory.")
     Path out;
 
+    @Option(names = "--classpath", arity = "0..*", split = ":",
+        description = "Resolution jars (e.g. the Android SDK android.jar). Lets the symbol solver "
+            + "resolve library calls referenced but not defined in --src. Repeat or ':'-separate.")
+    List<Path> classpath = new ArrayList<>();
+
     @Spec
     CommandSpec spec;
 
     @Override
     public Integer call() {
-        log.info("{} ▶️ parse --src {} --out {}", FN, src, out); // ▶️
+        log.info("{} ▶️ parse --src {} --out {} (classpath: {})", FN, src, out, classpath); // ▶️
         try {
-            AstIndex index = AstIndex.build(src);
+            AstIndex index = AstIndex.build(src, classpath);
             index.save(out);
             log.info("{} ✅ parsed {} compilation unit(s) -> {}", FN, index.units().size(), out); // ✅
             // One human summary line on stdout (logging conventions §2.1); not a step contract.
