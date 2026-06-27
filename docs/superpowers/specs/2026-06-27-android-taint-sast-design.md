@@ -12,6 +12,8 @@ Build a SAST pipeline that takes an Android **APK**, decompiles it, runs a **tai
 
 **Target vulnerability class:** `Intent / deeplink data → WebView.loadUrl` (open redirect / XSS, CWE-601).
 
+A **second** class — `Uri path segment → file open` (path traversal, CWE-22) — is implemented as a separate YAML config on the **same** engine. The challenge requires only one class; the second exists solely to prove rules are external config, not code, and to exercise the parallel fan-out. The engine and pipeline are identical for both.
+
 Rationale for this class:
 - Exists in **both** OVAA and DroidBench (the privacy-leak `getDeviceId` class does **not** exist in OVAA, so it was dropped).
 - Genuinely requires taint analysis, not grep: source and sink live in different classes/methods, connected through an `Intent` extra and a cross-component (deeplink) hop, with a bypassable sanitizer (`host.endsWith("example.com")`).
@@ -48,22 +50,25 @@ docker-compose:
 AnalyzeApkWorkflow(apkUri, analysisPlan):
 
   1. decompile(apkUri)              -> sources/                 [step]
-  2. extractManifestFacts(sources)  -> manifest-facts.json      [prerequisite, fast]
+  2. parseSources(sources)          -> ast-index               [prerequisite, parse-once]
+  3. extractManifestFacts(sources)  -> manifest-facts.json      [prerequisite, fast]
 
   ── parallel fan-out (one activity per entry in analysisPlan) ──
-     taintAnalyze(sources, facts, rules=webview.yaml)        -> findings-1.json
-     taintAnalyze(sources, facts, rules=pathtraversal.yaml)  -> findings-2.json   [future]
-     manifestAnalyze(facts, rules=misconfig.yaml)            -> findings-3.json   [optional]
-     <new analyzer>(...)                                     -> findings-N.json
+     taintAnalyze(ast-index, facts, rules=webview.yaml)        -> findings-1.json
+     taintAnalyze(ast-index, facts, rules=pathtraversal.yaml)  -> findings-2.json
+     manifestAnalyze(facts, rules=misconfig.yaml)              -> findings-3.json   [optional]
+     <new analyzer>(...)                                       -> findings-N.json
   ───────────────────────────────────────────────────────────────
 
-  3. mergeReport([findings-*])      -> report.html + report.sarif   [fan-in]
+  4. mergeReport([findings-*])      -> report.html + report.sarif   [fan-in]
 ```
 
 **Why this shape:**
 - **Fan-out** = `Promise.allOf(activities)` in Temporal — true parallel workers, independent retry/timeout per branch.
 - **Extensibility** — adding an analysis = one more entry in `analysisPlan`; the workflow code does not change.
 - **One taint engine, many YAML configs** = many vulnerability classes in parallel; directly demonstrates the "rules not hardcoded" requirement.
+- **Parse-once** — `parseSources` parses jadx Java a single time (JavaParser + SymbolSolver) into a serializable `ast-index` artifact; every fan-out analyzer consumes the index instead of re-parsing. Real speedup as the number of analyzers grows.
+- `parseSources` and `extractManifestFacts` both depend only on `sources/`, so they may themselves run in parallel; the fan-out waits on both.
 - **Fan-in** `mergeReport` aggregates all findings — the real payoff of an orchestrator.
 
 ### 3.1 Manifest: facts vs analyzer (the dependency split)
@@ -86,10 +91,10 @@ Every activity reads its input artifact(s) by key and writes its output artifact
 ### 3.3 Common analyzer contract
 
 ```
-Analyzer.analyze(sourcesUri, factsUri, configUri) -> findingsUri
+Analyzer.analyze(astIndexUri, factsUri, configUri) -> findingsUri
 ```
 
-Both `taintAnalyze` and `manifestAnalyze` implement this one contract, so the workflow treats them uniformly — it just iterates `analysisPlan` and fans out. `findings.json` is a shared schema (§7) so `mergeReport` is analyzer-agnostic.
+Both `taintAnalyze` and `manifestAnalyze` implement this one contract, so the workflow treats them uniformly — it just iterates `analysisPlan` and fans out. (Manifest analyzer ignores `astIndexUri`; taint analyzer reads the pre-parsed `ast-index` instead of re-parsing sources.) `findings.json` is a shared schema (§7) so `mergeReport` is analyzer-agnostic.
 
 ---
 
@@ -99,8 +104,9 @@ Both `taintAnalyze` and `manifestAnalyze` implement this one contract, so the wo
 |---|---|
 | `pipeline-worker` | Temporal workflow + activities, `ArtifactStore`, `analysisPlan` handling. |
 | `decompiler` | jadx wrapper (`jadx-core` embedded or CLI): APK → `.java` sources + extracts raw `AndroidManifest.xml`. |
+| `parser` | `parseSources`: JavaParser + SymbolSolver over `sources/` → serializable `ast-index` artifact (parse-once), consumed by every taint analyzer. |
 | `manifest` | Manifest facts extraction (`extractManifestFacts`) + manifest misconfig analyzer (`manifestAnalyze`). |
-| `taint-engine` | Rules loader, JavaParser AST → per-method CFG, taint propagation, summaries, light ICC, reachability filter, findings. |
+| `taint-engine` | Rules loader, AST-index → per-method CFG, taint propagation, summaries, light ICC, reachability filter, findings. Config-driven: one engine, many YAML rule files (e.g. `webview.yaml`, `pathtraversal.yaml`). |
 | `reporter` | findings.json → HTML (template) + SARIF v2.1.0. |
 | `rules/` | External YAML rule files (NOT compiled in). |
 | `benchmark/` | DroidBench harness (precision/recall) + OVAA fixture + optional Opengrep oracle. |
@@ -142,6 +148,34 @@ rules:
       - "android.net.Uri: android.net.Uri parse(java.lang.String)"
 ```
 
+Second class, same engine, separate file `pathtraversal.yaml` (proves rules are config, not code):
+
+```yaml
+version: 1
+rules:
+  - id: ANDROID_PATH_TRAVERSAL_PROVIDER
+    vulnerability_class: path-traversal
+    severity: error
+    cwe: CWE-22
+    owasp_mobile: M8
+    message: "Untrusted Uri path segment flows into file open (path traversal)"
+    manifest_conditions:
+      reachable_from_exported: true     # exported ContentProvider authority
+    sources:
+      - signature: "android.net.Uri: java.lang.String getLastPathSegment()"
+      - signature: "android.net.Uri: java.util.List getPathSegments()"
+    sinks:
+      - signature: "java.io.File: void <init>(java.io.File,java.lang.String)"
+        tainted_args: [1]
+      - signature: "android.os.ParcelFileDescriptor: android.os.ParcelFileDescriptor open(java.io.File,int)"
+        tainted_args: [0]
+    sanitizers:
+      - signature: "android.text.TextUtils: boolean isEmpty(java.lang.CharSequence)"
+        # canonical-path / "../" checks modeled as sanitizers when present
+```
+
+This maps to OVAA's `TheftOverwriteProvider.openFile` (`getLastPathSegment()` → `new File(...)` → `ParcelFileDescriptor.open`).
+
 **Signature grammar** (FlowDroid/Soot-style, easy to parse and to match against SymbolSolver output):
 `<fully.qualified.Class: ReturnType methodName(ParamType,ParamType,...)>` — inner classes use `$`.
 
@@ -153,8 +187,8 @@ A separate `misconfig.yaml` drives the manifest analyzer (different rule kind, s
 
 ## 6. Taint Analysis Algorithm
 
-### 6.1 Parse
-JavaParser + JavaSymbolSolver over `sources/`. SymbolSolver configured `--noclasspath`-style fail-soft: unresolved types raise catchable exceptions; analysis continues, resolving the calls it can (`Intent.getStringExtra`, `WebView.loadUrl`).
+### 6.1 Parse (the `parseSources` prerequisite)
+JavaParser + JavaSymbolSolver over `sources/`, run **once** by the `parseSources` step into the `ast-index` artifact. SymbolSolver configured `--noclasspath`-style fail-soft: unresolved types raise catchable exceptions; analysis continues, resolving the calls it can (`Intent.getStringExtra`, `WebView.loadUrl`). Every taint analyzer in the fan-out loads `ast-index` rather than re-parsing.
 
 ### 6.2 Source / sink matching
 Walk `MethodCallExpr` nodes; resolve each to a signature; match against the rule's `sources`/`sinks`. Receiver type is checked via SymbolSolver to avoid look-alike false matches.
@@ -221,7 +255,7 @@ List of findings with severity; source→sink path rendered as ordered steps wit
 - **DroidBench harness** — run the engine over selected categories and score against ground truth (`@number_of_leaks` JavaDoc + `// source` / `// sink, leak` comments) → TP / FP / FN → precision / recall / F1.
   - In-scope categories (realistic to pass): `GeneralJava`, `Lifecycle` / `Callbacks` (with an entry-point model), simple `FieldAndObjectSensitivity`, and ICC/WebView-relevant cases where applicable.
   - Out-of-scope (documented): `Reflection(_ICC)`, `ImplicitFlows`, `InterComponent/InterAppCommunication` (beyond light ICC key-matching), `DynamicLoading`, `Native`, `Threading`, `EmulatorDetection`.
-- **OVAA** — end-to-end: build `ovaa.apk` (no prebuilt release; `./gradlew assembleDebug`) and run the full pipeline. Expect exactly **1** finding (deeplink → `loadUrl`) and **0** false positives.
+- **OVAA** — end-to-end: build `ovaa.apk` (no prebuilt release; `./gradlew assembleDebug`) and run the full pipeline with both taint configs. Expect exactly **2** taint findings — deeplink → `WebView.loadUrl` (`webview.yaml`) and Uri path segment → `ParcelFileDescriptor.open` (`pathtraversal.yaml`) — plus any manifest-misconfig findings, and **0** false positives.
 - **Opengrep oracle (optional)** — run a Semgrep-style ruleset side-by-side as an independent baseline; show our detections match a battle-tested tool.
 - **Unit tests (TDD)** — each engine block (CFG, intra propagation, summaries, ICC, sanitizers, reachability, rules loader, SARIF/HTML emit).
 
