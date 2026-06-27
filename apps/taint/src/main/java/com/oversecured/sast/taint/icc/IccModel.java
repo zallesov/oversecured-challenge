@@ -10,8 +10,6 @@ import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
-import com.github.javaparser.ast.stmt.ExpressionStmt;
-import com.github.javaparser.ast.stmt.Statement;
 import com.oversecured.sast.common.FlowStep;
 import com.oversecured.sast.parser.AstIndex;
 import com.oversecured.sast.taint.match.RuleMatcher;
@@ -82,24 +80,24 @@ public final class IccModel {
         // pending putExtra edges keyed by intent variable name
         Map<String, List<Pending>> pending = new HashMap<>();
 
-        for (Statement stmt : method.getBody().get().getStatements()) {
-            if (!(stmt instanceof ExpressionStmt es)) {
-                continue;
-            }
-            Expression expr = es.getExpression();
-            recordAssignments(index, matcher, expr, taintedVars, intentTargets);
-            recordPutExtra(expr, taintedVars, pending);
-            recordStart(index, expr, component, intentTargets, pending, out);
-        }
-    }
-
-    private static void recordAssignments(AstIndex index, RuleMatcher matcher, Expression expr,
-                                          Set<String> taintedVars, Map<String, String> intentTargets) {
-        if (expr instanceof VariableDeclarationExpr vde) {
+        // Scan the whole method (incl. nested branches/loops), not just top-level statements:
+        // real ICC (e.g. OVAA's DeeplinkActivity) builds and dispatches the intent inside if-blocks.
+        // Phase 1: tainted variables and intent targets from assignments anywhere in the method.
+        for (VariableDeclarationExpr vde : method.findAll(VariableDeclarationExpr.class)) {
             vde.getVariables().forEach(d -> d.getInitializer().ifPresent(init ->
                     classify(index, matcher, d.getNameAsString(), init, taintedVars, intentTargets)));
-        } else if (expr instanceof AssignExpr ae && ae.getTarget() instanceof NameExpr target) {
-            classify(index, matcher, target.getNameAsString(), ae.getValue(), taintedVars, intentTargets);
+        }
+        for (AssignExpr ae : method.findAll(AssignExpr.class)) {
+            if (ae.getTarget() instanceof NameExpr target) {
+                classify(index, matcher, target.getNameAsString(), ae.getValue(), taintedVars, intentTargets);
+            }
+        }
+        // Phase 2: pending tainted putExtra edges. Phase 3: activate them on startActivity/startService.
+        for (MethodCallExpr mce : method.findAll(MethodCallExpr.class)) {
+            recordPutExtra(mce, taintedVars, pending);
+        }
+        for (MethodCallExpr mce : method.findAll(MethodCallExpr.class)) {
+            recordStart(index, mce, component, intentTargets, pending, out);
         }
     }
 
