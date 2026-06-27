@@ -1,0 +1,28 @@
+version: 1
+rules:
+  - id: ANDROID_WEBVIEW_JS_BRIDGE_EXPORTED
+    vulnerability_class: webview-js-bridge-exposure
+    severity: error
+    cwe: CWE-749
+    owasp_mobile: M1
+    message: "Untrusted exported entry point data controls a WebView JavaScript bridge name"
+
+    manifest_conditions:
+      reachable_from_exported: true
+
+    sources:
+      - signature: "android.content.Intent: java.lang.String getStringExtra(java.lang.String)"
+      - signature: "android.content.Intent: android.net.Uri getData()"
+      - signature: "android.net.Uri: java.lang.String getQueryParameter(java.lang.String)"
+
+    sinks:
+      - signature: "android.webkit.WebView: void addJavascriptInterface(java.lang.Object,java.lang.String)"
+        tainted_args: [1]
+
+    sanitizers:
+      - signature: "java.lang.String: boolean equals(java.lang.Object)"
+        # Exact allowlist comparison is acceptable; contains/endsWith-style checks are not.
+
+    propagators:
+      - "java.lang.String: java.lang.String concat(java.lang.String)"
+      - "java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.String)"

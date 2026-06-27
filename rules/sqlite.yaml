@@ -1,0 +1,32 @@
+version: 1
+rules:
+  - id: ANDROID_SQLITE_UNTRUSTED_QUERY
+    vulnerability_class: sqlite-injection
+    severity: error
+    cwe: CWE-89
+    owasp_mobile: M7
+    message: "Untrusted input flows into raw SQLite query execution"
+
+    manifest_conditions:
+      reachable_from_exported: true
+
+    sources:
+      - signature: "android.content.Intent: java.lang.String getStringExtra(java.lang.String)"
+      - signature: "android.content.Intent: android.net.Uri getData()"
+      - signature: "android.net.Uri: java.lang.String getQueryParameter(java.lang.String)"
+      - signature: "android.widget.EditText: android.text.Editable getText()"
+
+    sinks:
+      - signature: "android.database.sqlite.SQLiteDatabase: android.database.Cursor rawQuery(java.lang.String,java.lang.String[])"
+        tainted_args: [0]
+      - signature: "android.database.sqlite.SQLiteDatabase: void execSQL(java.lang.String)"
+        tainted_args: [0]
+
+    sanitizers:
+      - signature: "android.database.DatabaseUtils: java.lang.String sqlEscapeString(java.lang.String)"
+        # Prefer parameterized APIs such as query(..., selectionArgs) over string concatenation.
+
+    propagators:
+      - "java.lang.String: java.lang.String concat(java.lang.String)"
+      - "java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.String)"
+      - "java.lang.Object: java.lang.String toString()"

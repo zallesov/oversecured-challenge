@@ -16,6 +16,12 @@ dependencies {
 
     testImplementation project(':common')
     testImplementation project(':apps:parser')
+    testImplementation project(':apps:manifest-misconfig')
+    testImplementation "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:${rootProject.ext.jacksonVersion}"
+    testImplementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.jacksonVersion}"
+    testImplementation platform("org.junit:junit-bom:${rootProject.ext.junitVersion}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 application {

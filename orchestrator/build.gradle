@@ -2,7 +2,28 @@ plugins {
     id 'application'
 }
 
+dependencies {
+    implementation project(':common')
+    implementation project(':apps:decompiler')
+    implementation project(':apps:parser')
+    implementation project(':apps:manifest-facts')
+    implementation project(':apps:taint')
+    implementation project(':apps:manifest-misconfig')
+    implementation project(':apps:reporter')
+
+    implementation "io.temporal:temporal-sdk:${rootProject.ext.temporalVersion}"
+    implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"
+    annotationProcessor "info.picocli:picocli-codegen:${rootProject.ext.picocliVersion}"
+
+    testImplementation("io.temporal:temporal-testing:${rootProject.ext.temporalVersion}") {
+        capabilities {
+            requireCapability("io.temporal:temporal-testing-junit5")
+        }
+    }
+    testRuntimeOnly "io.temporal:temporal-test-server:${rootProject.ext.temporalVersion}"
+}
+
 application {
-    mainClass = 'com.oversecured.sast.orchestrator.OrchestratorApp'
+    mainClass = 'com.oversecured.sast.orchestrator.cli.WorkerMain'
     applicationName = 'orchestrator'
 }

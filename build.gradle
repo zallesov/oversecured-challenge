@@ -4,6 +4,7 @@ ext {
     jacksonVersion = '2.17.1'
     slf4jVersion = '2.0.13'
     picocliVersion = '4.7.6'
+    temporalVersion = '1.36.0'
 }
 
 subprojects {

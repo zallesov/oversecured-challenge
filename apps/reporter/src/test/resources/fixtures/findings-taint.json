@@ -1,0 +1,20 @@
+{
+  "analyzer": "taint-engine",
+  "findings": [
+    {
+      "ruleId": "ANDROID_WEBVIEW_INTENT_LOADURL",
+      "vulnerabilityClass": "webview-open-redirect",
+      "severity": "ERROR",
+      "message": "Untrusted deeplink data flows into WebView.loadUrl",
+      "cwe": "CWE-601",
+      "owaspMobile": "M1",
+      "flow": [
+        {"file": "DeeplinkActivity.java", "line": 47, "label": "source: Uri.getQueryParameter(\"url\")"},
+        {"file": "DeeplinkActivity.java", "line": 51, "label": "putExtra(\"url\", url) + startActivity"},
+        {"file": "WebViewActivity.java", "line": 20, "label": "getStringExtra(\"url\")"},
+        {"file": "WebViewActivity.java", "line": 22, "label": "sink: WebView.loadUrl(url)"}
+      ],
+      "notes": ["incomplete-sanitizer: host.endsWith(\"example.com\") bypassable"]
+    }
+  ]
+}
