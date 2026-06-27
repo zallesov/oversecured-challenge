@@ -1,0 +1,4 @@
+rootProject.name = 'android-taint-sast'
+
+include 'common'
+include 'apps:decompiler'

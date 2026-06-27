@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.oversecured.sast.common.LocalFsStoreTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-06-27T14:56:28" hostname="Mac.fritz.box" time="0.023">
+  <properties/>
+  <testcase name="putThenGetRoundTrips(Path)" classname="com.oversecured.sast.common.LocalFsStoreTest" time="0.023"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
