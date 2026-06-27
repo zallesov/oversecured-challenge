@@ -1,0 +1,19 @@
+plugins {
+    id 'java-library'
+    id 'application'
+}
+
+dependencies {
+    implementation project(':common')
+    implementation project(':apps:parser')
+    implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.jacksonVersion}"
+    implementation "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:${rootProject.ext.jacksonVersion}"
+    implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"
+
+    testImplementation project(':common')
+    testImplementation project(':apps:parser')
+}
+
+application {
+    mainClass = 'com.oversecured.sast.taint.cli.TaintCommand'
+}
