@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.oversecured.sast.common.SignatureParser;
 import com.oversecured.sast.misconfig.model.MisconfigCheck;
 import com.oversecured.sast.misconfig.model.MisconfigRuleFile;
 import com.oversecured.sast.taint.model.Rule;
@@ -87,6 +86,36 @@ class RulesValidationTest {
     }
 
     @Test
+    void sqliteRuleHasRawQueryAndExecSqlSinks() throws IOException {
+        RuleFile rf = loadRuleFile("sqlite.yaml");
+        Rule rule = rf.getRules().get(0);
+        assertEquals("ANDROID_SQLITE_UNTRUSTED_QUERY", rule.getId());
+
+        java.util.Map<String, java.util.List<Integer>> bySig = new java.util.HashMap<>();
+        for (SinkSpec s : rule.getSinks()) {
+            bySig.put(s.getSignature(), s.getTaintedArgs());
+        }
+        assertEquals(java.util.List.of(0),
+                bySig.get("android.database.sqlite.SQLiteDatabase: android.database.Cursor rawQuery(java.lang.String,java.lang.String[])"));
+        assertEquals(java.util.List.of(0),
+                bySig.get("android.database.sqlite.SQLiteDatabase: void execSQL(java.lang.String)"));
+    }
+
+    @Test
+    void webviewJsBridgeRuleHasAddJavascriptInterfaceSink() throws IOException {
+        RuleFile rf = loadRuleFile("webview-jsbridge.yaml");
+        Rule rule = rf.getRules().get(0);
+        assertEquals("ANDROID_WEBVIEW_JS_BRIDGE_EXPORTED", rule.getId());
+
+        SinkSpec bridge = rule.getSinks().stream()
+                .filter(s -> s.getSignature().equals(
+                        "android.webkit.WebView: void addJavascriptInterface(java.lang.Object,java.lang.String)"))
+                .findFirst().orElseThrow();
+        assertEquals(java.util.List.of(1), bridge.getTaintedArgs());
+        assertTrue(rule.getManifestConditions().isReachableFromExported());
+    }
+
+    @Test
     void misconfigFileHasTheFourChecks() throws IOException {
         MisconfigRuleFile mf = loadMisconfig();
         java.util.Set<String> ids = new java.util.HashSet<>();
@@ -102,9 +131,11 @@ class RulesValidationTest {
 
     @Test
     void endToEnd_allThreeFilesLoad_andEverySignatureParses() throws IOException {
-        // 1. Both taint rule files load into RuleFile.
+        // 1. Taint rule files load into RuleFile.
         RuleFile webview = loadRuleFile("webview.yaml");
         RuleFile pathtrav = loadRuleFile("pathtraversal.yaml");
+        RuleFile sqlite = loadRuleFile("sqlite.yaml");
+        RuleFile jsBridge = loadRuleFile("webview-jsbridge.yaml");
 
         // webview.yaml: loadUrl sink arg[0] + >=2 Intent sources
         SinkSpec loadUrl = webview.getRules().get(0).getSinks().stream()
@@ -128,24 +159,24 @@ class RulesValidationTest {
         // 2. misconfig.yaml loads into MisconfigRuleFile with exactly the four checks
         assertEquals(4, loadMisconfig().getChecks().size());
 
-        // 3. Every source/sink/sanitizer signature in both taint files parses via SignatureParser.
-        for (RuleFile rf : java.util.List.of(webview, pathtrav)) {
+        // 3. Every source/sink/sanitizer signature in all taint files parses via the rule loader adapter.
+        for (RuleFile rf : java.util.List.of(webview, pathtrav, sqlite, jsBridge)) {
             for (Rule rule : rf.getRules()) {
                 for (SourceSpec src : rule.getSources()) {
-                    assertNotNull(SignatureParser.parse(src.getSignature()),
+                    assertNotNull(RuleSignatures.parseMethod(src.getSignature()),
                             "source did not parse: " + src.getSignature());
                 }
                 for (SinkSpec sink : rule.getSinks()) {
-                    assertNotNull(SignatureParser.parse(sink.getSignature()),
+                    assertNotNull(RuleSignatures.parseMethod(sink.getSignature()),
                             "sink did not parse: " + sink.getSignature());
                 }
                 for (SanitizerSpec san : rule.getSanitizers()) {
-                    assertNotNull(SignatureParser.parse(san.getSignature()),
+                    assertNotNull(RuleSignatures.parseMethod(san.getSignature()),
                             "sanitizer did not parse: " + san.getSignature());
                 }
                 if (rule.getPropagators() != null) {
                     for (String prop : rule.getPropagators()) {
-                        assertNotNull(SignatureParser.parse(prop),
+                        assertNotNull(RuleSignatures.parseMethod(prop),
                                 "propagator did not parse: " + prop);
                     }
                 }
