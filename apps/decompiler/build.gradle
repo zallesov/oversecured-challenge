@@ -1,0 +1,18 @@
+plugins {
+    id 'application'
+}
+
+dependencies {
+    implementation project(':common')
+
+    implementation 'io.github.skylot:jadx-core:1.5.0'
+    implementation 'io.github.skylot:jadx-dex-input:1.5.0'
+    implementation 'info.picocli:picocli:4.7.6'
+
+    // jadx-core logs via SLF4J; provide a concrete binding so it runs cleanly.
+    runtimeOnly 'org.slf4j:slf4j-simple:2.0.13'
+}
+
+application {
+    mainClass = 'com.oversecured.sast.decompiler.DecompilerCli'
+}

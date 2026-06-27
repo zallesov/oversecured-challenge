@@ -18,6 +18,7 @@ subprojects {
 
     repositories {
         mavenCentral()
+        google()  // jadx transitive deps (aapt2-proto, smali) are published here
     }
 
     dependencies {
