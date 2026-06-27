@@ -33,5 +33,13 @@ mfacts --manifest sources/AndroidManifest.xml --out facts.json
 - Implicit-vs-explicit `exported` defaults handled per Android rules (e.g. component with an intent-filter defaults exported on older targetSdk).
 - Manifest with no exported components → valid, empty-surface `facts.json`.
 
+## Logging — emoji registry
+Per the [logging conventions](../../docs/superpowers/reference/2026-06-27-logging.md), each boundary function owns one function emoji:
+
+| Boundary function | Emoji |
+|-------------------|-------|
+| `ManifestFactsCommand.call` | 🧭 |
+| `ManifestFactsApp.extract` | 📜 |
+
 ## Notes
 This is the dependency that keeps the fan-out honest: taint depends on these facts, so this step is a **prerequisite**, not a fan-out analyzer. See spec §3.4.
