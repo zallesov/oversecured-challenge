@@ -12,7 +12,7 @@ public final class SinkSpec {
     @JsonCreator
     public SinkSpec(
             @JsonProperty("signature") String signature,
-            @JsonProperty("taintedArgs") List<Integer> taintedArgs) {
+            @JsonProperty("tainted_args") List<Integer> taintedArgs) {
         this.signature = signature;
         this.taintedArgs = taintedArgs == null ? List.of() : List.copyOf(taintedArgs);
     }

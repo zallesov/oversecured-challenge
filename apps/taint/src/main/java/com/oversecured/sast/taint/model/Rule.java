@@ -22,12 +22,12 @@ public final class Rule {
     @JsonCreator
     public Rule(
             @JsonProperty("id") String id,
-            @JsonProperty("vulnerabilityClass") String vulnerabilityClass,
+            @JsonProperty("vulnerability_class") String vulnerabilityClass,
             @JsonProperty("severity") Severity severity,
             @JsonProperty("cwe") String cwe,
-            @JsonProperty("owaspMobile") String owaspMobile,
+            @JsonProperty("owasp_mobile") String owaspMobile,
             @JsonProperty("message") String message,
-            @JsonProperty("manifestConditions") ManifestConditions manifestConditions,
+            @JsonProperty("manifest_conditions") ManifestConditions manifestConditions,
             @JsonProperty("sources") List<SourceSpec> sources,
             @JsonProperty("sinks") List<SinkSpec> sinks,
             @JsonProperty("sanitizers") List<SanitizerSpec> sanitizers,

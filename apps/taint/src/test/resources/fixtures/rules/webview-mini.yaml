@@ -1,0 +1,19 @@
+version: 1
+rules:
+  - id: ANDROID_WEBVIEW_INTENT_LOADURL
+    vulnerability_class: webview-open-redirect
+    severity: error
+    cwe: CWE-601
+    owasp_mobile: M1
+    message: "Untrusted Intent data flows into WebView.loadUrl"
+    manifest_conditions:
+      reachable_from_exported: true
+    sources:
+      - signature: "android.content.Intent: java.lang.String getStringExtra(java.lang.String)"
+    sinks:
+      - signature: "android.webkit.WebView: void loadUrl(java.lang.String)"
+        tainted_args: [0]
+    sanitizers:
+      - signature: "android.webkit.URLUtil: boolean isHttpsUrl(java.lang.String)"
+    propagators:
+      - "java.lang.String: java.lang.String concat(java.lang.String)"

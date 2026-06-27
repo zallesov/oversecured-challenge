@@ -9,7 +9,7 @@ public final class ManifestConditions {
 
     @JsonCreator
     public ManifestConditions(
-            @JsonProperty("reachableFromExported") boolean reachableFromExported) {
+            @JsonProperty("reachable_from_exported") boolean reachableFromExported) {
         this.reachableFromExported = reachableFromExported;
     }
 
