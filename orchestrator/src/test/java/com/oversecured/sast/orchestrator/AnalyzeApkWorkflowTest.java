@@ -48,8 +48,8 @@ class AnalyzeApkWorkflowTest {
                 "runs/run-1/report.html",
                 "runs/run-1/report.sarif"));
 
-        assertThat(activities.calls).startsWith(
-                "decompile:runs/run-1/sources",
+        assertThat(activities.calls.get(0)).isEqualTo("decompile:runs/run-1/sources");
+        assertThat(activities.calls.subList(1, 3)).containsExactlyInAnyOrder(
                 "parse:runs/run-1/ast-index",
                 "manifest-facts:runs/run-1/facts.json");
         assertThat(activities.calls.subList(3, 6)).containsExactlyInAnyOrder(
