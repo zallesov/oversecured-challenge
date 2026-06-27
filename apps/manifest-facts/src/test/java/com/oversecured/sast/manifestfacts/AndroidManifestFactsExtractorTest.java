@@ -73,4 +73,19 @@ class AndroidManifestFactsExtractorTest {
                         org.assertj.core.groups.Tuple.tuple("oversecured.defaults.FilesProvider", false),
                         org.assertj.core.groups.Tuple.tuple("oversecured.defaults.ExplicitFalseActivity", false));
     }
+
+    @Test
+    void extract_readsIntentFilterActionsAndDataSchemesHosts() throws Exception {
+        ManifestFacts facts = new AndroidManifestFactsExtractor()
+                .extract(fixture("deeplink-data.xml"));
+
+        ComponentFact component = facts.components().get(0);
+        assertThat(component.exported()).isTrue();
+        assertThat(component.intentFilters()).hasSize(1);
+
+        IntentFilterFact filter = component.intentFilters().get(0);
+        assertThat(filter.actions()).containsExactly("android.intent.action.VIEW");
+        assertThat(filter.schemes()).containsExactly("https", "oversecured");
+        assertThat(filter.hosts()).containsExactly("example.com", "ovaa");
+    }
 }

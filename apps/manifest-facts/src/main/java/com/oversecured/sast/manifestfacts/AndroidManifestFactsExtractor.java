@@ -1,6 +1,7 @@
 package com.oversecured.sast.manifestfacts;
 
 import com.oversecured.sast.common.ComponentFact;
+import com.oversecured.sast.common.IntentFilterFact;
 import com.oversecured.sast.common.ManifestFacts;
 import java.io.IOException;
 import java.io.InputStream;
@@ -8,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
@@ -48,7 +51,45 @@ public final class AndroidManifestFactsExtractor {
         String permission = componentPermission(element, type, applicationPermission);
         boolean grantUriPermissions = "provider".equals(type)
                 && Boolean.parseBoolean(XmlNames.androidAttr(element, "grantUriPermissions"));
-        return new ComponentFact(name, type, exported, List.of(), grantUriPermissions, permission);
+        return new ComponentFact(name, type, exported, intentFilters(element), grantUriPermissions, permission);
+    }
+
+    private static List<IntentFilterFact> intentFilters(Element component) {
+        List<IntentFilterFact> filters = new ArrayList<>();
+        for (Element child : childElements(component)) {
+            if (!child.getTagName().equals("intent-filter")) {
+                continue;
+            }
+            SortedSet<String> actions = new TreeSet<>();
+            SortedSet<String> schemes = new TreeSet<>();
+            SortedSet<String> hosts = new TreeSet<>();
+            for (Element filterChild : childElements(child)) {
+                switch (filterChild.getTagName()) {
+                    case "action" -> addIfPresent(actions, XmlNames.androidAttr(filterChild, "name"));
+                    case "data" -> {
+                        addIfPresent(schemes, XmlNames.androidAttr(filterChild, "scheme"));
+                        addIfPresent(hosts, XmlNames.androidAttr(filterChild, "host"));
+                    }
+                    case "category" -> {
+                        String ignored = XmlNames.androidAttr(filterChild, "name");
+                    }
+                    default -> {
+                        String ignored = filterChild.getTagName();
+                    }
+                }
+            }
+            filters.add(new IntentFilterFact(
+                    List.copyOf(actions),
+                    List.copyOf(schemes),
+                    List.copyOf(hosts)));
+        }
+        return List.copyOf(filters);
+    }
+
+    private static void addIfPresent(SortedSet<String> values, String value) {
+        if (value != null && !value.isBlank()) {
+            values.add(value);
+        }
     }
 
     private static String componentPermission(Element element, String type, String applicationPermission) {
