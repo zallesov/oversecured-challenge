@@ -1,0 +1,30 @@
+version: 1
+rules:
+  - id: ANDROID_WEBVIEW_INTENT_LOADURL
+    vulnerability_class: webview-open-redirect
+    severity: error
+    cwe: CWE-601
+    owasp_mobile: M1
+    message: "Untrusted Intent/deeplink data flows into WebView.loadUrl"
+
+    manifest_conditions:
+      reachable_from_exported: true     # report only if the source component is exported
+                                        # OR reachable from an exported component via ICC
+
+    sources:
+      - signature: "android.content.Intent: java.lang.String getStringExtra(java.lang.String)"
+      - signature: "android.content.Intent: android.net.Uri getData()"
+      - signature: "android.net.Uri: java.lang.String getQueryParameter(java.lang.String)"
+
+    sinks:
+      - signature: "android.webkit.WebView: void loadUrl(java.lang.String)"
+        tainted_args: [0]               # which parameter position is dangerous
+
+    sanitizers:
+      - signature: "android.webkit.URLUtil: boolean isHttpsUrl(java.lang.String)"
+        # host.endsWith("example.com")-style checks are modeled as INCOMPLETE sanitizers (spec §6.6)
+
+    propagators:                        # built-in defaults; rule may extend
+      - "java.lang.String: java.lang.String concat(java.lang.String)"
+      - "java.lang.StringBuilder: java.lang.StringBuilder append(java.lang.String)"
+      - "android.net.Uri: android.net.Uri parse(java.lang.String)"

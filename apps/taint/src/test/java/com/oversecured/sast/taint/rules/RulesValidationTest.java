@@ -1,0 +1,62 @@
+package com.oversecured.sast.taint.rules;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.oversecured.sast.taint.model.Rule;
+import com.oversecured.sast.taint.model.RuleFile;
+import com.oversecured.sast.taint.model.SinkSpec;
+import com.oversecured.sast.taint.model.SourceSpec;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class RulesValidationTest {
+
+    private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory())
+            .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS, true);
+
+    /** Walk up from the test working dir until we find the repo's rules/ dir. */
+    static Path rulesDir() {
+        Path dir = Path.of("").toAbsolutePath();
+        while (dir != null) {
+            Path candidate = dir.resolve("rules");
+            if (Files.isRegularFile(candidate.resolve("webview.yaml"))) {
+                return candidate;
+            }
+            dir = dir.getParent();
+        }
+        throw new IllegalStateException("could not locate rules/ directory from " + Path.of("").toAbsolutePath());
+    }
+
+    static RuleFile loadRuleFile(String name) throws IOException {
+        return YAML.readValue(rulesDir().resolve(name).toFile(), RuleFile.class);
+    }
+
+    @Test
+    void webviewRuleHasLoadUrlSinkAndIntentSources() throws IOException {
+        RuleFile rf = loadRuleFile("webview.yaml");
+        assertEquals(1, rf.getRules().size());
+        Rule rule = rf.getRules().get(0);
+        assertEquals("ANDROID_WEBVIEW_INTENT_LOADURL", rule.getId());
+
+        SinkSpec loadUrl = rule.getSinks().stream()
+                .filter(s -> s.getSignature().equals("android.webkit.WebView: void loadUrl(java.lang.String)"))
+                .findFirst().orElseThrow();
+        assertEquals(java.util.List.of(0), loadUrl.getTaintedArgs());
+
+        long intentSources = rule.getSources().stream()
+                .map(SourceSpec::getSignature)
+                .filter(sig -> sig.startsWith("android.content.Intent:"))
+                .count();
+        assertTrue(intentSources >= 2, "expected >=2 Intent sources, got " + intentSources);
+    }
+}
