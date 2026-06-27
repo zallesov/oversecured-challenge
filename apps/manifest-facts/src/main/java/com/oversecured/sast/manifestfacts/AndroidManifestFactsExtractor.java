@@ -3,6 +3,13 @@ package com.oversecured.sast.manifestfacts;
 import com.oversecured.sast.common.ComponentFact;
 import com.oversecured.sast.common.IntentFilterFact;
 import com.oversecured.sast.common.ManifestFacts;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -13,11 +20,6 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
 
 public final class AndroidManifestFactsExtractor {
 
@@ -83,12 +85,8 @@ public final class AndroidManifestFactsExtractor {
                         addIfPresent(schemes, XmlNames.androidAttr(filterChild, "scheme"));
                         addIfPresent(hosts, XmlNames.androidAttr(filterChild, "host"));
                     }
-                    case "category" -> {
-                        String ignored = XmlNames.androidAttr(filterChild, "name");
-                    }
-                    default -> {
-                        String ignored = filterChild.getTagName();
-                    }
+                    // category and any other child carry no field in IntentFilterFact.
+                    default -> { }
                 }
             }
             filters.add(new IntentFilterFact(

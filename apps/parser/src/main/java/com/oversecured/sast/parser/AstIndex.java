@@ -10,9 +10,9 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSol
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import com.github.javaparser.utils.SourceRoot;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oversecured.sast.common.Diagnostics;
 import com.oversecured.sast.common.FailureKind;
+import com.oversecured.sast.common.Json;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +42,6 @@ public final class AstIndex {
     private static final String FN_SAVE = "💾"; // 💾
     /** Function emoji for the load boundary (logging conventions §5). */
     private static final String FN_LOAD = "📂"; // 📂
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Path sourcesDir;
     private final List<CompilationUnit> units;
@@ -122,8 +120,8 @@ public final class AstIndex {
                 IndexMeta.CURRENT_VERSION,
                 sourcesDir.toString(),
                 ParserConfiguration.LanguageLevel.JAVA_17.name());
-            MAPPER.writerWithDefaultPrettyPrinter()
-                .writeValue(indexDir.resolve("index-meta.json").toFile(), meta);
+            // Shared ObjectMapper (INDENT_OUTPUT enabled) so every artifact serializes uniformly.
+            Json.mapper().writeValue(indexDir.resolve("index-meta.json").toFile(), meta);
             log.info("{} 📁 wrote ast-index descriptor to {}", FN_SAVE, indexDir); // 📁
         } catch (IOException e) {
             throw new ParserException(FailureKind.TRANSIENT,
@@ -138,7 +136,7 @@ public final class AstIndex {
     public static AstIndex load(Path indexDir) {
         log.info("{} ▶️ load ast-index from {}", FN_LOAD, indexDir); // ▶️
         try {
-            IndexMeta meta = MAPPER.readValue(
+            IndexMeta meta = Json.mapper().readValue(
                 indexDir.resolve("index-meta.json").toFile(), IndexMeta.class);
             return build(Path.of(meta.sourcesDir()));
         } catch (IOException e) {
