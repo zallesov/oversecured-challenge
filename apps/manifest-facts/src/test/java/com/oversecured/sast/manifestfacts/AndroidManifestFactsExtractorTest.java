@@ -32,4 +32,18 @@ class AndroidManifestFactsExtractorTest {
         assertThat(facts.components().get(0).intentFilters().get(0).schemes())
                 .containsExactly("oversecured");
     }
+
+    private java.nio.file.Path fixture(String name) throws Exception {
+        return java.nio.file.Paths.get(getClass().getResource("/manifests/" + name).toURI());
+    }
+
+    @Test
+    void extract_readsPackageName() throws Exception {
+        ManifestFacts facts = new AndroidManifestFactsExtractor()
+                .extract(fixture("exported-explicit.xml"));
+
+        assertThat(facts.packageName()).isEqualTo("oversecured.ovaa");
+        assertThat(facts.components()).isEmpty();
+        assertThat(facts.permissions()).isEmpty();
+    }
 }

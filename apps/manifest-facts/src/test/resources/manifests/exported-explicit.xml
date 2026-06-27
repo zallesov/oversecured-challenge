@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="oversecured.ovaa">
+    <application android:permission="oversecured.ovaa.permission.INTERNAL">
+        <activity
+            android:name=".activities.DeeplinkActivity"
+            android:exported="true" />
+        <service
+            android:name="oversecured.ovaa.SyncService"
+            android:exported="false" />
+    </application>
+</manifest>
