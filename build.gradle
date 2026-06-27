@@ -3,6 +3,7 @@ ext {
     assertjVersion = '3.25.3'
     jacksonVersion = '2.17.1'
     slf4jVersion = '2.0.13'
+    picocliVersion = '4.7.6'
 }
 
 subprojects {
