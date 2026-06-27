@@ -10,11 +10,15 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSol
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import com.github.javaparser.utils.SourceRoot;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oversecured.sast.common.Diagnostics;
+import com.oversecured.sast.common.FailureKind;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +38,12 @@ public final class AstIndex {
 
     /** Function emoji for the build boundary (logging conventions §5). */
     private static final String FN_BUILD = "🌳"; // 🌳
+    /** Function emoji for the save boundary (logging conventions §5). */
+    private static final String FN_SAVE = "💾"; // 💾
+    /** Function emoji for the load boundary (logging conventions §5). */
+    private static final String FN_LOAD = "📂"; // 📂
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Path sourcesDir;
     private final List<CompilationUnit> units;
@@ -95,12 +105,46 @@ public final class AstIndex {
         return sourcesDir;
     }
 
+    /**
+     * Persist the index. JavaParser ASTs hold non-serializable resolver state and parent links, so
+     * persisting them natively is impractical. This writes only a JSON descriptor of the source set
+     * + solver config; {@link #load(Path)} re-parses from it. Tradeoff: <b>parse-once-per-run</b>
+     * (build then save within a run is cheap to reproduce), <b>load re-parses</b> the original
+     * {@code sources/}, which must remain available to the downstream taint step (spec §3.5).
+     *
+     * <p>Service boundary: an IO write fault is environmental and surfaced as
+     * {@link ParserException} (TRANSIENT) per error-handling conventions §3.
+     */
     public void save(Path indexDir) {
-        throw new UnsupportedOperationException("implemented in Task 4");
+        try {
+            Files.createDirectories(indexDir);
+            IndexMeta meta = new IndexMeta(
+                IndexMeta.CURRENT_VERSION,
+                sourcesDir.toString(),
+                ParserConfiguration.LanguageLevel.JAVA_17.name());
+            MAPPER.writerWithDefaultPrettyPrinter()
+                .writeValue(indexDir.resolve("index-meta.json").toFile(), meta);
+            log.info("{} 📁 wrote ast-index descriptor to {}", FN_SAVE, indexDir); // 📁
+        } catch (IOException e) {
+            throw new ParserException(FailureKind.TRANSIENT,
+                "failed to write ast-index to " + indexDir + " (" + e.getMessage() + ")", e);
+        }
     }
 
+    /**
+     * Re-parse the sources described by {@code indexDir/index-meta.json}. A missing/corrupt
+     * descriptor is a deterministic input fault surfaced as {@link ParserException} (PERMANENT).
+     */
     public static AstIndex load(Path indexDir) {
-        throw new UnsupportedOperationException("implemented in Task 4");
+        log.info("{} ▶️ load ast-index from {}", FN_LOAD, indexDir); // ▶️
+        try {
+            IndexMeta meta = MAPPER.readValue(
+                indexDir.resolve("index-meta.json").toFile(), IndexMeta.class);
+            return build(Path.of(meta.sourcesDir()));
+        } catch (IOException e) {
+            throw new ParserException(FailureKind.PERMANENT,
+                "failed to read ast-index from " + indexDir + " (" + e.getMessage() + ")", e);
+        }
     }
 
     /**
