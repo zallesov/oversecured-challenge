@@ -17,4 +17,18 @@ public class BasicFlows {
         String full = url.concat("/path");
         webView.loadUrl(full);
     }
+
+    public void sanitized(Intent intent, WebView webView) {
+        String url = intent.getStringExtra("url");
+        if (URLUtil.isHttpsUrl(url)) {
+            webView.loadUrl(url);
+        }
+    }
+
+    public void incompleteSanitized(Intent intent, WebView webView) {
+        String url = intent.getStringExtra("url");
+        if (url.endsWith("example.com")) {
+            webView.loadUrl(url);
+        }
+    }
 }

@@ -12,6 +12,7 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
@@ -127,9 +128,63 @@ public final class IntraProceduralAnalyzer {
         return state;
     }
 
-    /** Hook for sanitizer modeling (Task 7); base behavior leaves the then-branch state untouched. */
-    protected TaintState thenBranchState(IfStmt ifStmt, TaintState state) {
-        return state;
+    private static final java.util.Set<String> INCOMPLETE_SANITIZER_NAMES =
+            java.util.Set.of("endsWith", "contains", "startsWith");
+
+    /**
+     * Apply guard semantics to the then-branch state. A matched rule sanitizer call in the condition
+     * kills taint on its operands. A bypassable {@code endsWith/contains/startsWith} host check is an
+     * <em>incomplete</em> sanitizer: taint survives but the carrying trace is annotated.
+     */
+    private TaintState thenBranchState(IfStmt ifStmt, TaintState state) {
+        TaintState cur = state;
+        for (MethodCallExpr mce : ifStmt.getCondition().findAll(MethodCallExpr.class)) {
+            Optional<String> sig = index.resolveSignature(mce);
+            if (sig.isPresent() && matcher.sanitizerFor(sig.get()).isPresent()) {
+                cur = killSanitizedOperands(mce, cur);
+            } else if (isIncompleteSanitizer(mce, cur)) {
+                cur = annotateIncomplete(mce, cur);
+            }
+        }
+        return cur;
+    }
+
+    private TaintState killSanitizedOperands(MethodCallExpr mce, TaintState state) {
+        TaintState cur = state;
+        if (mce.getScope().isPresent()) {
+            cur = killIfTainted(mce.getScope().get(), cur);
+        }
+        for (Expression arg : mce.getArguments()) {
+            cur = killIfTainted(arg, cur);
+        }
+        return cur;
+    }
+
+    private static TaintState killIfTainted(Expression e, TaintState state) {
+        AccessPath p = targetPath(e);
+        return (p != null && state.isTainted(p)) ? state.kill(p) : state;
+    }
+
+    private boolean isIncompleteSanitizer(MethodCallExpr mce, TaintState state) {
+        if (!INCOMPLETE_SANITIZER_NAMES.contains(mce.getNameAsString())) {
+            return false;
+        }
+        Optional<Expression> scope = mce.getScope();
+        if (scope.isEmpty()) {
+            return false;
+        }
+        AccessPath p = targetPath(scope.get());
+        if (p == null || !state.isTainted(p)) {
+            return false;
+        }
+        return mce.getArguments().stream()
+                .anyMatch(a -> a instanceof StringLiteralExpr sl && sl.getValue().contains("."));
+    }
+
+    private TaintState annotateIncomplete(MethodCallExpr mce, TaintState state) {
+        AccessPath p = targetPath(mce.getScope().orElseThrow());
+        FlowTrace annotated = state.trace(p).addNote("incomplete-sanitizer: " + mce + " is bypassable");
+        return state.taint(p, annotated);
     }
 
     private TaintState loop(Statement body, TaintState state) {
