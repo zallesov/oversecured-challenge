@@ -38,12 +38,25 @@ class AndroidManifestFactsExtractorTest {
     }
 
     @Test
-    void extract_readsPackageName() throws Exception {
+    void extract_readsComponents_explicitExported_relativeNames_andPermissions() throws Exception {
         ManifestFacts facts = new AndroidManifestFactsExtractor()
                 .extract(fixture("exported-explicit.xml"));
 
         assertThat(facts.packageName()).isEqualTo("oversecured.ovaa");
-        assertThat(facts.components()).isEmpty();
-        assertThat(facts.permissions()).isEmpty();
+        assertThat(facts.components()).extracting(ComponentFact::name)
+                .containsExactly(
+                        "oversecured.ovaa.activities.DeeplinkActivity",
+                        "oversecured.ovaa.SyncService");
+
+        ComponentFact activity = facts.components().get(0);
+        assertThat(activity.type()).isEqualTo("activity");
+        assertThat(activity.exported()).isTrue();
+        assertThat(activity.permission()).isEqualTo("oversecured.ovaa.permission.INTERNAL");
+        assertThat(activity.intentFilters()).isEmpty();
+
+        ComponentFact service = facts.components().get(1);
+        assertThat(service.type()).isEqualTo("service");
+        assertThat(service.exported()).isFalse();
+        assertThat(service.permission()).isEqualTo("oversecured.ovaa.permission.INTERNAL");
     }
 }
