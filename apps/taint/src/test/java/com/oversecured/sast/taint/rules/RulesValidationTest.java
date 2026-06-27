@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.oversecured.sast.common.SignatureParser;
 import com.oversecured.sast.misconfig.model.MisconfigCheck;
 import com.oversecured.sast.misconfig.model.MisconfigRuleFile;
 import com.oversecured.sast.taint.model.Rule;
 import com.oversecured.sast.taint.model.RuleFile;
+import com.oversecured.sast.taint.model.SanitizerSpec;
 import com.oversecured.sast.taint.model.SinkSpec;
 import com.oversecured.sast.taint.model.SourceSpec;
 import java.io.IOException;
@@ -17,6 +19,7 @@ import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RulesValidationTest {
@@ -95,5 +98,58 @@ class RulesValidationTest {
                 "exported_provider",
                 "provider_grant_uri_permissions",
                 "weak_host_validation"), ids);
+    }
+
+    @Test
+    void endToEnd_allThreeFilesLoad_andEverySignatureParses() throws IOException {
+        // 1. Both taint rule files load into RuleFile.
+        RuleFile webview = loadRuleFile("webview.yaml");
+        RuleFile pathtrav = loadRuleFile("pathtraversal.yaml");
+
+        // webview.yaml: loadUrl sink arg[0] + >=2 Intent sources
+        SinkSpec loadUrl = webview.getRules().get(0).getSinks().stream()
+                .filter(s -> s.getSignature().equals("android.webkit.WebView: void loadUrl(java.lang.String)"))
+                .findFirst().orElseThrow();
+        assertEquals(java.util.List.of(0), loadUrl.getTaintedArgs());
+        assertTrue(webview.getRules().get(0).getSources().stream()
+                .filter(s -> s.getSignature().startsWith("android.content.Intent:"))
+                .count() >= 2);
+
+        // pathtraversal.yaml: the two file sinks with correct tainted args
+        java.util.Map<String, java.util.List<Integer>> ptSinks = new java.util.HashMap<>();
+        for (SinkSpec s : pathtrav.getRules().get(0).getSinks()) {
+            ptSinks.put(s.getSignature(), s.getTaintedArgs());
+        }
+        assertEquals(java.util.List.of(1),
+                ptSinks.get("java.io.File: void <init>(java.io.File,java.lang.String)"));
+        assertEquals(java.util.List.of(0),
+                ptSinks.get("android.os.ParcelFileDescriptor: android.os.ParcelFileDescriptor open(java.io.File,int)"));
+
+        // 2. misconfig.yaml loads into MisconfigRuleFile with exactly the four checks
+        assertEquals(4, loadMisconfig().getChecks().size());
+
+        // 3. Every source/sink/sanitizer signature in both taint files parses via SignatureParser.
+        for (RuleFile rf : java.util.List.of(webview, pathtrav)) {
+            for (Rule rule : rf.getRules()) {
+                for (SourceSpec src : rule.getSources()) {
+                    assertNotNull(SignatureParser.parse(src.getSignature()),
+                            "source did not parse: " + src.getSignature());
+                }
+                for (SinkSpec sink : rule.getSinks()) {
+                    assertNotNull(SignatureParser.parse(sink.getSignature()),
+                            "sink did not parse: " + sink.getSignature());
+                }
+                for (SanitizerSpec san : rule.getSanitizers()) {
+                    assertNotNull(SignatureParser.parse(san.getSignature()),
+                            "sanitizer did not parse: " + san.getSignature());
+                }
+                if (rule.getPropagators() != null) {
+                    for (String prop : rule.getPropagators()) {
+                        assertNotNull(SignatureParser.parse(prop),
+                                "propagator did not parse: " + prop);
+                    }
+                }
+            }
+        }
     }
 }
