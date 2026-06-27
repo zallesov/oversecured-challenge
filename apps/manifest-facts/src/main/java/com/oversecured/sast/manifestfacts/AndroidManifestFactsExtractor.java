@@ -37,7 +37,20 @@ public final class AndroidManifestFactsExtractor {
                 }
             }
         }
-        return new ManifestFacts(packageName, List.copyOf(components), List.of());
+        return new ManifestFacts(packageName, List.copyOf(components), manifestPermissions(manifest));
+    }
+
+    private static List<String> manifestPermissions(Element manifest) {
+        SortedSet<String> permissions = new TreeSet<>();
+        for (Element child : childElements(manifest)) {
+            String tag = child.getTagName();
+            if (tag.equals("uses-permission")
+                    || tag.equals("uses-permission-sdk-23")
+                    || tag.equals("permission")) {
+                addIfPresent(permissions, XmlNames.androidAttr(child, "name"));
+            }
+        }
+        return List.copyOf(permissions);
     }
 
     private static ComponentFact toComponent(String packageName, String applicationPermission, Element element) {

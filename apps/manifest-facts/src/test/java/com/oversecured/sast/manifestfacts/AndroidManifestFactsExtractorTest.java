@@ -88,4 +88,26 @@ class AndroidManifestFactsExtractorTest {
         assertThat(filter.schemes()).containsExactly("https", "oversecured");
         assertThat(filter.hosts()).containsExactly("example.com", "ovaa");
     }
+
+    @Test
+    void extract_readsManifestPermissionsAndProviderReadWritePermissions() throws Exception {
+        ManifestFacts facts = new AndroidManifestFactsExtractor()
+                .extract(fixture("permissions-and-provider.xml"));
+
+        assertThat(facts.permissions()).containsExactly(
+                "android.permission.INTERNET",
+                "android.permission.READ_EXTERNAL_STORAGE",
+                "oversecured.perms.permission.SIGNATURE");
+
+        assertThat(facts.components()).extracting(ComponentFact::name, ComponentFact::grantUriPermissions, ComponentFact::permission)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                "oversecured.perms.FilesProvider",
+                                true,
+                                "read=oversecured.perms.permission.READ;write=oversecured.perms.permission.WRITE"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "oversecured.perms.ProtectedReceiver",
+                                false,
+                                "oversecured.perms.permission.SIGNATURE"));
+    }
 }
