@@ -8,6 +8,7 @@ import com.oversecured.sast.common.ManifestFacts;
 import com.oversecured.sast.taint.flow.CandidateFinding;
 import com.oversecured.sast.taint.flow.IntraProceduralAnalyzer;
 import com.oversecured.sast.taint.icc.IccModel;
+import com.oversecured.sast.taint.manifest.ReachabilityFilter;
 import com.oversecured.sast.taint.match.RuleMatcher;
 import com.oversecured.sast.taint.model.Rule;
 import com.oversecured.sast.taint.summary.MethodSummary;
@@ -30,10 +31,17 @@ public final class TaintAnalyzer {
         IccModel icc = IccModel.collect(index, matcher, rule);
         IntraProceduralAnalyzer analyzer = new IntraProceduralAnalyzer(index, matcher, rule, summaries, icc);
 
+        ReachabilityFilter reachability = new ReachabilityFilter(facts);
         List<CandidateFinding> candidates = new ArrayList<>();
         for (var cu : index.units()) {
             for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
-                candidates.addAll(analyzer.analyzeMethod(method));
+                for (CandidateFinding c : analyzer.analyzeMethod(method)) {
+                    if (!reachability.keep(c, rule.getManifestConditions())) {
+                        continue;
+                    }
+                    String reason = reachability.reason(c);
+                    candidates.add(reason == null ? c : c.withNote(reason));
+                }
             }
         }
         return new FindingsDoc("taint-engine", normalize(candidates, rule));
