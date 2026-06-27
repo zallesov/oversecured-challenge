@@ -37,79 +37,135 @@ Rationale for this class:
 
 ---
 
-## 3. Pipeline Architecture (Temporal, fan-out/fan-in)
+## 3. Pipeline Architecture (6 independent apps + 1 orchestrator)
+
+### 3.0 Core principle: independent, separately-runnable steps
+
+Each step is its **own runnable application** — own `main`, own CLI, own build, own tests. A step reads its input **artifacts by path/uri** and writes its output artifact. Every step can be run **standalone** (feed it a fixture artifact for debugging or testing) *or* driven by the orchestrator. "Independent" means *separately launchable*, **not** dependency-free: a step legitimately consumes artifacts produced by earlier steps. The orchestrator holds **no analysis logic** — it only wires data flow, sequencing, parallelism, retries.
+
+### 3.1 The six steps
+
+| # | App | CLI (illustrative) | Input artifacts | Output artifact | Scheduling |
+|---|-----|--------------------|-----------------|-----------------|------------|
+| 1 | `decompiler` | `decompile --apk a.apk --out sources/` | `apk` | `sources/` + `AndroidManifest.xml` | sequential (first) |
+| 2 | `parser` | `parse --src sources/ --out ast-index/` | `sources/` | `ast-index/` (serialized AST + symbols) | after 1, ∥ with 3 |
+| 3 | `manifest-facts` | `mfacts --manifest AndroidManifest.xml --out facts.json` | `AndroidManifest.xml` | `facts.json` (exported, deeplinks, perms) | after 1, ∥ with 2 |
+| 4 | `taint` | `taint --ast ast-index/ --facts facts.json --rule webview.yaml --out f.json` | `ast-index/` + `facts.json` + `rule.yaml` | `findings.json` | fan-out ×N rules |
+| 5 | `manifest-misconfig` | `mscan --facts facts.json --rule misconfig.yaml --out f.json` | `facts.json` + `misconfig.yaml` | `findings.json` | fan-out |
+| 6 | `reporter` | `report --findings 'f-*.json' --out report.html report.sarif` | all `findings*.json` | `report.html` + `report.sarif` | fan-in (last) |
+
+`taint` (step 4) is a **single** application; the fan-out runs it multiple times with **different YAML rule files** (`webview.yaml`, `pathtraversal.yaml`). A new vulnerability class = a new YAML file — no code change.
+
+### 3.2 Orchestrated DAG
+
+```
+                    ┌─────────────┐
+                    │ decompiler  │  (1)
+                    └──────┬──────┘
+                  sources/ + AndroidManifest.xml
+                     ┌─────┴─────┐
+                     ▼           ▼
+               ┌─────────┐  ┌──────────────┐
+               │ parser  │  │manifest-facts│   (2 ∥ 3)
+               └────┬────┘  └──────┬───────┘
+                ast-index/      facts.json
+                     └─────┬────────┴──────────────┐
+                           ▼   fan-out (parallel)   ▼
+        ┌──────────────┬──────────────┬────────────────────┐
+        │ taint        │ taint        │ manifest-misconfig  │  (4 ×N, 5)
+        │ webview.yaml │ pathtrav.yaml│ misconfig.yaml      │
+        └──────┬───────┴──────┬───────┴─────────┬───────────┘
+          findings-1     findings-2        findings-3
+               └──────────────┼──────────────────┘
+                              ▼  fan-in
+                       ┌─────────────┐
+                       │  reporter   │  (6)
+                       └──────┬──────┘
+                     report.html + report.sarif
+```
+
+**Why this shape:**
+- **Independently runnable** — every step debugged/tested in isolation by supplying fixture artifacts; the orchestrator is just the production wiring.
+- **Fan-out** = `Promise.allOf(activities)` in Temporal — true parallel workers, independent retry/timeout per branch.
+- **Extensibility** — adding an analysis = one more entry in `analysisPlan`; the workflow code does not change.
+- **One taint app, many YAML configs** = many vulnerability classes in parallel; directly demonstrates the "rules not hardcoded" requirement.
+- `parser` and `manifest-facts` both depend only on `sources/`/`AndroidManifest.xml`, so they run in parallel; the fan-out waits on both.
+- **Fan-in** `reporter` aggregates all findings — the real payoff of an orchestrator.
+
+### 3.3 Runtime topology (docker-compose)
 
 ```
 docker-compose:
   ├── temporal        (server)
   ├── temporal-ui     (workflow visibility)
   ├── postgres        (temporal persistence)
-  ├── worker          (Java: JavaParser engine + all activities)
+  ├── worker          (Java: hosts the 6 step apps as Temporal activities)
   └── minio           (S3-compatible artifact store; optional — shared volume fallback)
-
-AnalyzeApkWorkflow(apkUri, analysisPlan):
-
-  1. decompile(apkUri)              -> sources/                 [step]
-  2. parseSources(sources)          -> ast-index               [prerequisite, parse-once]
-  3. extractManifestFacts(sources)  -> manifest-facts.json      [prerequisite, fast]
-
-  ── parallel fan-out (one activity per entry in analysisPlan) ──
-     taintAnalyze(ast-index, facts, rules=webview.yaml)        -> findings-1.json
-     taintAnalyze(ast-index, facts, rules=pathtraversal.yaml)  -> findings-2.json
-     manifestAnalyze(facts, rules=misconfig.yaml)              -> findings-3.json   [optional]
-     <new analyzer>(...)                                       -> findings-N.json
-  ───────────────────────────────────────────────────────────────
-
-  4. mergeReport([findings-*])      -> report.html + report.sarif   [fan-in]
 ```
 
-**Why this shape:**
-- **Fan-out** = `Promise.allOf(activities)` in Temporal — true parallel workers, independent retry/timeout per branch.
-- **Extensibility** — adding an analysis = one more entry in `analysisPlan`; the workflow code does not change.
-- **One taint engine, many YAML configs** = many vulnerability classes in parallel; directly demonstrates the "rules not hardcoded" requirement.
-- **Parse-once** — `parseSources` parses jadx Java a single time (JavaParser + SymbolSolver) into a serializable `ast-index` artifact; every fan-out analyzer consumes the index instead of re-parsing. Real speedup as the number of analyzers grows.
-- `parseSources` and `extractManifestFacts` both depend only on `sources/`, so they may themselves run in parallel; the fan-out waits on both.
-- **Fan-in** `mergeReport` aggregates all findings — the real payoff of an orchestrator.
-
-### 3.1 Manifest: facts vs analyzer (the dependency split)
+### 3.4 Manifest: facts vs analyzer (the dependency split)
 
 Android manifest plays **two distinct roles**; conflating them breaks the parallelism:
 
 1. **Manifest FACTS extraction** (`extractManifestFacts`) — extracts `exported` flags, `intent-filter`s, deeplink `scheme`/`host`, permissions → `manifest-facts.json`. This is **not** an analyzer; it produces no findings. The taint analyzer **depends** on it (entry-points + reachability), so it runs as a **sequential prerequisite** after decompile, before the fan-out.
 2. **Manifest MISCONFIG analysis** (`manifestAnalyze`) — exported-without-permission, exported provider with `grantUriPermissions`, weak host validation, etc. as a genuine vulnerability class producing findings. This runs as **one analyzer in the parallel fan-out**, consuming the same facts.
 
-So: facts extraction is a prerequisite; misconfig analysis is a parallel analyzer; taint is a parallel analyzer that consumes facts.
+So: facts extraction (step 3) is a prerequisite; misconfig analysis (step 5) is a parallel analyzer; taint (step 4) is a parallel analyzer that consumes facts.
 
-### 3.2 Artifact store
+### 3.5 Artifact store
 
 `ArtifactStore` interface: `put(key, bytes)` / `get(key) -> bytes`.
 - `LocalFsStore` — challenge default (shared volume / local dir).
 - `S3Store` — cloud (MinIO locally; S3 in prod).
 
-Every activity reads its input artifact(s) by key and writes its output artifact by key. Activities are **idempotent**, so Temporal retries are free. This is the "each step is a worker producing an artifact consumed by the next" model, portable to cloud with no code change.
+Every step reads its input artifact(s) by key and writes its output artifact by key. Steps are **idempotent**, so Temporal retries are free. This is the "each step is a worker producing an artifact consumed by the next" model, portable to cloud with no code change — each step app could run on its own worker/container.
 
-### 3.3 Common analyzer contract
+### 3.6 Common analyzer contract (steps 4 & 5)
 
 ```
 Analyzer.analyze(astIndexUri, factsUri, configUri) -> findingsUri
 ```
 
-Both `taintAnalyze` and `manifestAnalyze` implement this one contract, so the workflow treats them uniformly — it just iterates `analysisPlan` and fans out. (Manifest analyzer ignores `astIndexUri`; taint analyzer reads the pre-parsed `ast-index` instead of re-parsing sources.) `findings.json` is a shared schema (§7) so `mergeReport` is analyzer-agnostic.
+Both `taint` (4) and `manifest-misconfig` (5) implement this one contract, so the orchestrator treats fan-out branches uniformly — it just iterates `analysisPlan` and fans out. (The manifest analyzer ignores `astIndexUri`; the taint analyzer reads the pre-parsed `ast-index`.) `findings.json` is a shared schema (§7) so `reporter` (6) is analyzer-agnostic.
 
 ---
 
-## 4. Components (Java, Gradle multi-module)
+## 4. Components & Repo Layout (Java, Gradle multi-module)
 
-| Module | Responsibility |
-|---|---|
-| `pipeline-worker` | Temporal workflow + activities, `ArtifactStore`, `analysisPlan` handling. |
-| `decompiler` | jadx wrapper (`jadx-core` embedded or CLI): APK → `.java` sources + extracts raw `AndroidManifest.xml`. |
-| `parser` | `parseSources`: JavaParser + SymbolSolver over `sources/` → serializable `ast-index` artifact (parse-once), consumed by every taint analyzer. |
-| `manifest` | Manifest facts extraction (`extractManifestFacts`) + manifest misconfig analyzer (`manifestAnalyze`). |
-| `taint-engine` | Rules loader, AST-index → per-method CFG, taint propagation, summaries, light ICC, reachability filter, findings. Config-driven: one engine, many YAML rule files (e.g. `webview.yaml`, `pathtraversal.yaml`). |
-| `reporter` | findings.json → HTML (template) + SARIF v2.1.0. |
-| `rules/` | External YAML rule files (NOT compiled in). |
-| `benchmark/` | DroidBench harness (precision/recall) + OVAA fixture + optional Opengrep oracle. |
+Each step app is its own module producing both a **runnable CLI** (`main`) and a **library API** (so the Temporal worker can invoke it in-process). Shared types live in `common`; the orchestrator wires steps; `rules/` and `benchmark/` are non-code assets.
+
+| Module | Kind | Responsibility |
+|---|---|---|
+| `apps/decompiler` | step 1 | jadx wrapper (`jadx-core` embedded or CLI): APK → `.java` sources + extracts raw `AndroidManifest.xml`. |
+| `apps/parser` | step 2 | JavaParser + SymbolSolver over `sources/` → serialized `ast-index/` (parse-once), consumed by taint. |
+| `apps/manifest-facts` | step 3 | Parse `AndroidManifest.xml` → `facts.json` (exported flags, intent-filters, deeplink scheme/host, permissions). No findings. |
+| `apps/taint` | step 4 | The engine: rules loader, AST-index → per-method CFG, taint propagation, summaries, light ICC, reachability filter, findings. Config-driven: one engine, many YAML files. |
+| `apps/manifest-misconfig` | step 5 | Manifest misconfiguration analyzer (exported-without-permission, weak host validation, provider grantUriPermissions, …), driven by `misconfig.yaml`. |
+| `apps/reporter` | step 6 | Merge all `findings*.json` → HTML (template) + SARIF v2.1.0. |
+| `orchestrator` | wiring | Temporal workflow + activities (one activity per step app), `analysisPlan` handling, fan-out/fan-in. No analysis logic. |
+| `common` | lib | `ArtifactStore` (`LocalFsStore`/`S3Store`), `findings.json` schema, method-signature parser, shared model. |
+| `rules/` | assets | External YAML rule files (NOT compiled in): `webview.yaml`, `pathtraversal.yaml`, `misconfig.yaml`. |
+| `benchmark/` | assets | DroidBench harness (precision/recall) + OVAA fixture + optional Opengrep oracle. |
+
+```
+challenge/
+├── apps/
+│   ├── decompiler/           # step 1
+│   ├── parser/               # step 2
+│   ├── manifest-facts/       # step 3
+│   ├── taint/                # step 4 (engine)
+│   ├── manifest-misconfig/   # step 5
+│   └── reporter/             # step 6
+├── orchestrator/             # Temporal workflow + activities
+├── common/                   # ArtifactStore, findings schema, signature parser
+├── rules/                    # webview.yaml, pathtraversal.yaml, misconfig.yaml
+├── benchmark/                # DroidBench harness, OVAA fixture, Opengrep oracle
+├── docker-compose.yml        # temporal, ui, postgres, worker, minio
+├── settings.gradle
+└── docs/superpowers/specs/
+```
+
+Each `apps/<step>/` and `orchestrator/`, `common/`, `rules/`, `benchmark/` carries a `README.md` describing that step's purpose, exact input/output artifacts, CLI usage, and tests.
 
 ---
 
