@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.oversecured.sast.decompiler.DecompilerServiceTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-06-27T14:59:06" hostname="Mac.fritz.box" time="0.065">
+  <properties/>
+  <testcase name="decompilesRealApkToSourcesAndManifest(Path)" classname="com.oversecured.sast.decompiler.DecompilerServiceTest" time="0.065"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[[Test worker] INFO jadx.api.JadxDecompiler - loading ...
+[Test worker] INFO jadx.core.dex.nodes.RootNode - Loaded classes: 9, methods: 11, instructions: 92
+]]></system-err>
+</testsuite>
