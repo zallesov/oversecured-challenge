@@ -20,8 +20,8 @@ class IntraProceduralAnalyzerTest {
         return new Rule(
                 "R", "webview-open-redirect", Severity.ERROR, "CWE-601", "M1", "msg",
                 new ManifestConditions(false),
-                List.of(new SourceSpec("com.example.Intent: java.lang.String getStringExtra(java.lang.String)")),
-                List.of(new SinkSpec("com.example.WebView: void loadUrl(java.lang.String)", List.of(0))),
+                List.of(new SourceSpec("android.content.Intent: java.lang.String getStringExtra(java.lang.String)")),
+                List.of(new SinkSpec("android.webkit.WebView: void loadUrl(java.lang.String)", List.of(0))),
                 List.of(),
                 List.of("java.lang.String: java.lang.String concat(java.lang.String)"));
     }
@@ -69,9 +69,9 @@ class IntraProceduralAnalyzerTest {
         Rule rule = new Rule(
                 "R", "webview-open-redirect", Severity.ERROR, "CWE-601", "M1", "msg",
                 new ManifestConditions(false),
-                List.of(new SourceSpec("com.example.Intent: java.lang.String getStringExtra(java.lang.String)")),
-                List.of(new SinkSpec("com.example.WebView: void loadUrl(java.lang.String)", List.of(0))),
-                List.of(new SanitizerSpec("com.example.URLUtil: boolean isHttpsUrl(java.lang.String)")),
+                List.of(new SourceSpec("android.content.Intent: java.lang.String getStringExtra(java.lang.String)")),
+                List.of(new SinkSpec("android.webkit.WebView: void loadUrl(java.lang.String)", List.of(0))),
+                List.of(new SanitizerSpec("android.webkit.URLUtil: boolean isHttpsUrl(java.lang.String)")),
                 List.of());
 
         var findings = new IntraProceduralAnalyzer(index, RuleMatcher.forRule(rule), rule, List.of())

@@ -1,5 +1,9 @@
 package com.example;
 
+import android.content.Intent;
+import android.webkit.URLUtil;
+import android.webkit.WebView;
+
 public class BasicFlows {
     public void direct(Intent intent, WebView webView) {
         String url = intent.getStringExtra("url");
