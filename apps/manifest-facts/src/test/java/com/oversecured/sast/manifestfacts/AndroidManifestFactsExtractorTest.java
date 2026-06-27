@@ -110,4 +110,24 @@ class AndroidManifestFactsExtractorTest {
                                 false,
                                 "oversecured.perms.permission.SIGNATURE"));
     }
+
+    @Test
+    void endToEnd_extractsFactsNeededByTaintAndMisconfigConsumers() throws Exception {
+        ManifestFacts facts = new AndroidManifestFactsExtractor()
+                .extract(fixture("deeplink-data.xml"));
+
+        assertThat(facts.packageName()).isEqualTo("oversecured.deeplink");
+        assertThat(facts.components()).hasSize(1);
+        ComponentFact deeplink = facts.components().get(0);
+        assertThat(deeplink.type()).isEqualTo("activity");
+        assertThat(deeplink.exported()).isTrue();
+        assertThat(deeplink.permission()).isNull();
+        assertThat(deeplink.intentFilters()).hasSize(1);
+        assertThat(deeplink.intentFilters().get(0).actions())
+                .containsExactly("android.intent.action.VIEW");
+        assertThat(deeplink.intentFilters().get(0).schemes())
+                .containsExactly("https", "oversecured");
+        assertThat(deeplink.intentFilters().get(0).hosts())
+                .containsExactly("example.com", "ovaa");
+    }
 }

@@ -31,4 +31,17 @@ class ManifestFactsAppTest {
         assertThat(Files.readString(out)).contains("\"packageName\"");
         assertThat(Files.readString(out)).contains("\"intentFilters\"");
     }
+
+    @Test
+    void extract_malformedXmlDoesNotWriteFactsJson() throws Exception {
+        Path badManifest = tempDir.resolve("AndroidManifest.xml");
+        Path out = tempDir.resolve("facts.json");
+        Files.writeString(badManifest, "<manifest><application></manifest>");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> new ManifestFactsApp().extract(badManifest, out))
+                .isInstanceOf(ManifestFactsException.class)
+                .hasMessageContaining("AndroidManifest.xml");
+        assertThat(out).doesNotExist();
+    }
 }
