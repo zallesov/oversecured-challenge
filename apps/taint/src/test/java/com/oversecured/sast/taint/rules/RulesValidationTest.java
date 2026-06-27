@@ -59,4 +59,21 @@ class RulesValidationTest {
                 .count();
         assertTrue(intentSources >= 2, "expected >=2 Intent sources, got " + intentSources);
     }
+
+    @Test
+    void pathTraversalRuleHasTwoFileSinksWithCorrectTaintedArgs() throws IOException {
+        RuleFile rf = loadRuleFile("pathtraversal.yaml");
+        Rule rule = rf.getRules().get(0);
+        assertEquals("ANDROID_PATH_TRAVERSAL_PROVIDER", rule.getId());
+
+        java.util.Map<String, java.util.List<Integer>> bySig = new java.util.HashMap<>();
+        for (SinkSpec s : rule.getSinks()) {
+            bySig.put(s.getSignature(), s.getTaintedArgs());
+        }
+        assertEquals(2, bySig.size());
+        assertEquals(java.util.List.of(1),
+                bySig.get("java.io.File: void <init>(java.io.File,java.lang.String)"));
+        assertEquals(java.util.List.of(0),
+                bySig.get("android.os.ParcelFileDescriptor: android.os.ParcelFileDescriptor open(java.io.File,int)"));
+    }
 }
