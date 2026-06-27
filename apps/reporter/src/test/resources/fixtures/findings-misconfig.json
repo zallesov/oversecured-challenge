@@ -1,0 +1,17 @@
+{
+  "analyzer": "manifest-misconfig",
+  "findings": [
+    {
+      "ruleId": "ANDROID_EXPORTED_NO_PERMISSION",
+      "vulnerabilityClass": "manifest-misconfig",
+      "severity": "WARNING",
+      "message": "Exported activity without permission",
+      "cwe": "CWE-926",
+      "owaspMobile": "M1",
+      "flow": [
+        {"file": "AndroidManifest.xml", "line": 12, "label": "activity android:exported=\"true\" with no permission"}
+      ],
+      "notes": []
+    }
+  ]
+}

@@ -2,7 +2,14 @@ plugins {
     id 'application'
 }
 
+dependencies {
+    implementation project(':common')
+    implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.jacksonVersion}"
+    implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"
+    annotationProcessor "info.picocli:picocli-codegen:${rootProject.ext.picocliVersion}"
+}
+
 application {
-    mainClass = 'com.oversecured.sast.reporter.ReporterApp'
+    mainClass = 'com.oversecured.sast.reporter.ReportCommand'
     applicationName = 'report'
 }
