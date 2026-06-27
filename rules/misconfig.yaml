@@ -1,0 +1,25 @@
+version: 1
+checks:
+  - id: exported_without_permission
+    severity: warning
+    cwe: CWE-926
+    kind: exported-component-no-permission
+    message: "Component is exported (or has an intent-filter) without a signature/custom permission guard"
+
+  - id: exported_provider
+    severity: error
+    cwe: CWE-926
+    kind: exported-content-provider
+    message: "ContentProvider is exported, exposing its data/openFile surface to other apps"
+
+  - id: provider_grant_uri_permissions
+    severity: warning
+    cwe: CWE-266
+    kind: provider-grant-uri-permissions
+    message: "ContentProvider sets grantUriPermissions=true, allowing temporary URI access grants that can leak data"
+
+  - id: weak_host_validation
+    severity: error
+    cwe: CWE-601
+    kind: weak-host-validation
+    message: "Deeplink host validated with endsWith/contains instead of exact match (bypassable, e.g. evilexample.com)"

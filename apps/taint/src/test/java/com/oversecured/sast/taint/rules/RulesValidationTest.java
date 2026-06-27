@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.oversecured.sast.misconfig.model.MisconfigCheck;
+import com.oversecured.sast.misconfig.model.MisconfigRuleFile;
 import com.oversecured.sast.taint.model.Rule;
 import com.oversecured.sast.taint.model.RuleFile;
 import com.oversecured.sast.taint.model.SinkSpec;
@@ -41,6 +43,10 @@ class RulesValidationTest {
         return YAML.readValue(rulesDir().resolve(name).toFile(), RuleFile.class);
     }
 
+    static MisconfigRuleFile loadMisconfig() throws IOException {
+        return YAML.readValue(rulesDir().resolve("misconfig.yaml").toFile(), MisconfigRuleFile.class);
+    }
+
     @Test
     void webviewRuleHasLoadUrlSinkAndIntentSources() throws IOException {
         RuleFile rf = loadRuleFile("webview.yaml");
@@ -75,5 +81,19 @@ class RulesValidationTest {
                 bySig.get("java.io.File: void <init>(java.io.File,java.lang.String)"));
         assertEquals(java.util.List.of(0),
                 bySig.get("android.os.ParcelFileDescriptor: android.os.ParcelFileDescriptor open(java.io.File,int)"));
+    }
+
+    @Test
+    void misconfigFileHasTheFourChecks() throws IOException {
+        MisconfigRuleFile mf = loadMisconfig();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (MisconfigCheck c : mf.getChecks()) {
+            ids.add(c.getId());
+        }
+        assertEquals(java.util.Set.of(
+                "exported_without_permission",
+                "exported_provider",
+                "provider_grant_uri_permissions",
+                "weak_host_validation"), ids);
     }
 }
