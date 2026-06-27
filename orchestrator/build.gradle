@@ -1,0 +1,8 @@
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'com.oversecured.sast.orchestrator.OrchestratorApp'
+    applicationName = 'orchestrator'
+}
