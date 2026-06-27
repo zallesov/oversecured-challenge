@@ -6,6 +6,10 @@ plugins {
 dependencies {
     implementation project(':common')
     implementation project(':apps:parser')
+    // parser exposes javaparser only as `implementation`, so taint needs it directly
+    // (AstIndex.units()/resolveSignature() expose JavaParser AST types, and the CFG/flow
+    // engine and tests operate on them).
+    implementation 'com.github.javaparser:javaparser-symbol-solver-core:3.26.2'
     implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.jacksonVersion}"
     implementation "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:${rootProject.ext.jacksonVersion}"
     implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"
