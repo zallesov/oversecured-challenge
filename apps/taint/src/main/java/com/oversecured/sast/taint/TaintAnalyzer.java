@@ -23,9 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Public taint analyzer API. Loads the AST index, manifest facts, and a rule, runs the staged
@@ -95,23 +93,30 @@ public final class TaintAnalyzer {
     }
 
     private List<Finding> normalize(List<CandidateFinding> candidates, Rule rule) {
-        Set<String> seen = new LinkedHashSet<>();
-        List<Finding> findings = new ArrayList<>();
+        // Collapse candidates that share a rule and source origin (e.g. a constructor sink and the
+        // later open() sink reached from the same tainted value) into one, keeping the longer flow
+        // so the terminal sink step is preferred.
+        java.util.Map<String, CandidateFinding> bySource = new java.util.LinkedHashMap<>();
         for (CandidateFinding c : candidates) {
-            if (seen.add(dedupKey(c))) {
-                findings.add(toFinding(c, rule));
+            if (c.flow().isEmpty()) {
+                continue;
             }
+            String key = dedupKey(c);
+            CandidateFinding existing = bySource.get(key);
+            if (existing == null || c.flow().size() > existing.flow().size()) {
+                bySource.put(key, c);
+            }
+        }
+        List<Finding> findings = new ArrayList<>();
+        for (CandidateFinding c : bySource.values()) {
+            findings.add(toFinding(c, rule));
         }
         return findings;
     }
 
     private static String dedupKey(CandidateFinding c) {
-        FlowStep sink = c.flow().get(c.flow().size() - 1);
-        StringBuilder labels = new StringBuilder();
-        for (FlowStep s : c.flow()) {
-            labels.append(s.label()).append('|');
-        }
-        return c.ruleId() + "::" + sink.file() + "::" + sink.line() + "::" + labels;
+        FlowStep source = c.flow().get(0);
+        return c.ruleId() + "::" + source.file() + "::" + source.line();
     }
 
     private static Finding toFinding(CandidateFinding c, Rule rule) {

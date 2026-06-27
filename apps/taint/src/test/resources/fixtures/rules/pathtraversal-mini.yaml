@@ -1,0 +1,19 @@
+version: 1
+rules:
+  - id: ANDROID_PATH_TRAVERSAL_PROVIDER
+    vulnerability_class: path-traversal
+    severity: error
+    cwe: CWE-22
+    owasp_mobile: M8
+    message: "Untrusted Uri path segment flows into file open"
+    manifest_conditions:
+      reachable_from_exported: true
+    sources:
+      - signature: "android.net.Uri: java.lang.String getLastPathSegment()"
+    sinks:
+      - signature: "java.io.File: void <init>(java.io.File,java.lang.String)"
+        tainted_args: [1]
+      - signature: "android.os.ParcelFileDescriptor: android.os.ParcelFileDescriptor open(java.io.File,int)"
+        tainted_args: [0]
+    sanitizers: []
+    propagators: []

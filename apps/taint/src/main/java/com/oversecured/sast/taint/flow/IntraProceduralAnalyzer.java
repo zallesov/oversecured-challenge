@@ -12,8 +12,10 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
+import com.github.javaparser.resolution.declarations.ResolvedConstructorDeclaration;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ForEachStmt;
@@ -278,7 +280,55 @@ public final class IntraProceduralAnalyzer {
         if (expr instanceof MethodCallExpr mce) {
             return evalCall(mce, state);
         }
+        if (expr instanceof ObjectCreationExpr oce) {
+            return evalNew(oce, state);
+        }
         return Optional.empty();
+    }
+
+    /** Evaluate a constructor call: match {@code <init>} sinks and propagate taint into the new object. */
+    private Optional<FlowTrace> evalNew(ObjectCreationExpr oce, TaintState state) {
+        List<Optional<FlowTrace>> argTraces = new ArrayList<>();
+        for (Expression arg : oce.getArguments()) {
+            argTraces.add(eval(arg, state));
+        }
+        String resolved = constructorSignature(oce);
+        if (resolved == null) {
+            return Optional.empty();
+        }
+        Optional<SinkSpec> sink = matcher.sinkFor(resolved);
+        Optional<FlowTrace> carried = Optional.empty();
+        if (sink.isPresent()) {
+            for (int idx : sink.get().getTaintedArgs()) {
+                if (idx >= 0 && idx < argTraces.size() && argTraces.get(idx).isPresent()) {
+                    emitFinding(argTraces.get(idx).get(), oce);
+                    carried = Optional.of(argTraces.get(idx).get());
+                    break;
+                }
+            }
+        }
+        // A constructed object built from tainted input stays tainted so it can reach a later sink.
+        if (carried.isEmpty()) {
+            carried = argTraces.stream().filter(Optional::isPresent).map(Optional::get)
+                    .min((a, b) -> Integer.compare(a.length(), b.length()));
+        }
+        return carried.map(t -> t.addStep(step(oce, "propagator: new " + oce.getType().getNameAsString() + "(...)")));
+    }
+
+    private String constructorSignature(ObjectCreationExpr oce) {
+        try {
+            ResolvedConstructorDeclaration decl = oce.resolve();
+            StringBuilder params = new StringBuilder();
+            for (int i = 0; i < decl.getNumberOfParams(); i++) {
+                if (i > 0) {
+                    params.append(',');
+                }
+                params.append(decl.getParam(i).getType().describe());
+            }
+            return "<" + decl.declaringType().getQualifiedName() + ": void <init>(" + params + ")>";
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private Optional<FlowTrace> evalCall(MethodCallExpr mce, TaintState state) {

@@ -1,0 +1,7 @@
+{
+  "packageName": "com.example",
+  "components": [
+    {"name": "com.example.Provider", "type": "provider", "exported": true, "intentFilters": [], "permission": null}
+  ],
+  "permissions": []
+}
