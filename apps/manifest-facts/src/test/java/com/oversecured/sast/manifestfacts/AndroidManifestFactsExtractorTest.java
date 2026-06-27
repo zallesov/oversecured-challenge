@@ -59,4 +59,18 @@ class AndroidManifestFactsExtractorTest {
         assertThat(service.exported()).isFalse();
         assertThat(service.permission()).isEqualTo("oversecured.ovaa.permission.INTERNAL");
     }
+
+    @Test
+    void extract_appliesPre31DefaultExportedFromIntentFilters() throws Exception {
+        ManifestFacts facts = new AndroidManifestFactsExtractor()
+                .extract(fixture("exported-defaults.xml"));
+
+        assertThat(facts.components()).extracting(ComponentFact::name, ComponentFact::exported)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("oversecured.defaults.FilteredActivity", true),
+                        org.assertj.core.groups.Tuple.tuple("oversecured.defaults.BootReceiver", true),
+                        org.assertj.core.groups.Tuple.tuple("oversecured.defaults.PlainService", false),
+                        org.assertj.core.groups.Tuple.tuple("oversecured.defaults.FilesProvider", false),
+                        org.assertj.core.groups.Tuple.tuple("oversecured.defaults.ExplicitFalseActivity", false));
+    }
 }

@@ -40,8 +40,11 @@ public final class AndroidManifestFactsExtractor {
     private static ComponentFact toComponent(String packageName, String applicationPermission, Element element) {
         String type = element.getTagName().equals("activity-alias") ? "activity" : element.getTagName();
         String name = normalizeComponentName(packageName, XmlNames.androidAttr(element, "name"));
+        boolean hasIntentFilter = hasChild(element, "intent-filter");
         String exportedRaw = XmlNames.androidAttr(element, "exported");
-        boolean exported = exportedRaw != null && Boolean.parseBoolean(exportedRaw);
+        boolean exported = exportedRaw == null
+                ? defaultExported(type, hasIntentFilter)
+                : Boolean.parseBoolean(exportedRaw);
         String permission = componentPermission(element, type, applicationPermission);
         boolean grantUriPermissions = "provider".equals(type)
                 && Boolean.parseBoolean(XmlNames.androidAttr(element, "grantUriPermissions"));
@@ -67,6 +70,17 @@ public final class AndroidManifestFactsExtractor {
             }
         }
         return applicationPermission;
+    }
+
+    private static boolean defaultExported(String type, boolean hasIntentFilter) {
+        if ("provider".equals(type)) {
+            return false;
+        }
+        return hasIntentFilter;
+    }
+
+    private static boolean hasChild(Element parent, String tagName) {
+        return firstChild(parent, tagName) != null;
     }
 
     private static boolean isComponentTag(String tag) {
