@@ -2,7 +2,19 @@ plugins {
     id 'application'
 }
 
+dependencies {
+    implementation project(':common')
+    implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.jacksonVersion}"
+    implementation "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:${rootProject.ext.jacksonVersion}"
+    implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"
+    annotationProcessor "info.picocli:picocli-codegen:${rootProject.ext.picocliVersion}"
+}
+
 application {
-    mainClass = 'com.oversecured.sast.manifestmisconfig.ManifestMisconfigApp'
+    mainClass = 'com.oversecured.sast.misconfig.Main'
     applicationName = 'mscan'
+}
+
+tasks.named('run') {
+    workingDir = rootProject.projectDir
 }
