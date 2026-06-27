@@ -1,6 +1,8 @@
 # Manifest Misconfig (Step 5, fan-out) Implementation Plan
 
 **Shared conventions:** [Shared Contracts and Naming Conventions](../reference/2026-06-27-shared-contracts-and-conventions.md)
+**Logging:** [Logging Conventions](../reference/2026-06-27-logging.md)
+**Error handling:** [Error Handling Conventions](../reference/2026-06-27-error-handling.md)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
