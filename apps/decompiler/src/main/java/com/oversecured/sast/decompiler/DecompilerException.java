@@ -1,13 +1,16 @@
 package com.oversecured.sast.decompiler;
 
-/** Thrown when decompilation cannot proceed; carries a human-readable message for the CLI. */
-public class DecompilerException extends RuntimeException {
+import com.oversecured.sast.common.FailureKind;
+import com.oversecured.sast.common.PipelineException;
 
-    public DecompilerException(String message) {
-        super(message);
+/** Thrown when decompilation cannot proceed; carries a {@link FailureKind} and a CLI-ready message. */
+public class DecompilerException extends PipelineException {
+
+    public DecompilerException(FailureKind kind, String message) {
+        super(kind, message);
     }
 
-    public DecompilerException(String message, Throwable cause) {
-        super(message, cause);
+    public DecompilerException(FailureKind kind, String message, Throwable cause) {
+        super(kind, message, cause);
     }
 }

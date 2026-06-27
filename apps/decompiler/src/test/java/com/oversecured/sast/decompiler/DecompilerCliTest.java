@@ -23,7 +23,8 @@ class DecompilerCliTest {
 
         int exit = cmd.execute("--apk", missing.toString(), "--out", out.toString());
 
-        assertThat(exit).isNotZero();
+        // Missing input is a PERMANENT failure -> exit code 2 (error-handling conventions §5).
+        assertThat(exit).isEqualTo(2);
         assertThat(err.toString()).contains("decompile failed").contains("not found");
     }
 

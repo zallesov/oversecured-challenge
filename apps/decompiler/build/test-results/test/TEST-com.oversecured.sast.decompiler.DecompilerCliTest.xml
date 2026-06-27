@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.oversecured.sast.decompiler.DecompilerCliTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-06-27T14:59:05" hostname="Mac.fritz.box" time="0.052">
+<testsuite name="com.oversecured.sast.decompiler.DecompilerCliTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-06-27T15:21:55" hostname="Mac.fritz.box" time="0.056">
   <properties/>
-  <testcase name="missingRequiredOptionExitsNonZero(Path)" classname="com.oversecured.sast.decompiler.DecompilerCliTest" time="0.047"/>
-  <testcase name="missingApkExitsNonZeroWithClearError(Path)" classname="com.oversecured.sast.decompiler.DecompilerCliTest" time="0.004"/>
+  <testcase name="missingRequiredOptionExitsNonZero(Path)" classname="com.oversecured.sast.decompiler.DecompilerCliTest" time="0.05"/>
+  <testcase name="missingApkExitsNonZeroWithClearError(Path)" classname="com.oversecured.sast.decompiler.DecompilerCliTest" time="0.005"/>
   <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
+  <system-err><![CDATA[[Test worker] INFO com.oversecured.sast.decompiler.DecompilerCli - ]]>&#x1f680;<![CDATA[ ▶️ decompile --apk /var/folders/7j/qts1qph52rl4jlvxqyky7f640000gn/T/junit2043583140434091896/nope.apk --out /var/folders/7j/qts1qph52rl4jlvxqyky7f640000gn/T/junit2043583140434091896/out
+[Test worker] ERROR com.oversecured.sast.decompiler.DecompilerCli - ]]>&#x1f680;<![CDATA[ ❌ decompile failed: apk not found: /var/folders/7j/qts1qph52rl4jlvxqyky7f640000gn/T/junit2043583140434091896/nope.apk
+]]></system-err>
 </testsuite>
