@@ -9,3 +9,6 @@ build/
 
 # OS
 .DS_Store
+
+# Local runtime data
+minio-data/

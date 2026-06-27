@@ -14,12 +14,11 @@ services:
     depends_on:
       - postgres
     environment:
-      DB: postgresql
+      DB: postgres12
       DB_PORT: "5432"
       POSTGRES_USER: temporal
       POSTGRES_PWD: temporal
       POSTGRES_SEEDS: postgres
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
     ports:
       - "7233:7233"
 
@@ -39,6 +38,7 @@ services:
       dockerfile: orchestrator/Dockerfile
     depends_on:
       - temporal
+    restart: on-failure
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       ARTIFACT_ROOT: /workspace/artifacts
@@ -48,7 +48,7 @@ services:
       - ./test-subjects:/workspace/test-subjects:ro
 
   minio:
-    image: minio/minio:RELEASE.2026-05-24T17-08-30Z
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
     profiles:
       - minio
     command: server /data --console-address ":9001"
@@ -59,8 +59,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio-data:/data
+      - ./minio-data:/data
 
 volumes:
   temporal-postgres:
-  minio-data:
