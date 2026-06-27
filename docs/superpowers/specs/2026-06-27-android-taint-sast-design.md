@@ -1,5 +1,7 @@
 # Android Taint SAST Pipeline — Design Spec
 
+**Shared conventions:** [Shared Contracts and Naming Conventions](../reference/2026-06-27-shared-contracts-and-conventions.md)
+
 **Date:** 2026-06-27
 **Status:** Approved (design)
 **Challenge:** OverSecured Coding Challenge, Part 2 — *"Implement a simple dataflow / taint SAST analysis for Android for one vulnerability class. The detection rules must not be hardcoded — they live in an external, abstract rules format."*
@@ -166,6 +168,25 @@ challenge/
 ```
 
 Each `apps/<step>/` and `orchestrator/`, `common/`, `rules/`, `benchmark/` carries a `README.md` describing that step's purpose, exact input/output artifacts, CLI usage, and tests.
+
+### 4.1 Implementation-plan coverage status
+
+The design is covered by implementation plans in `docs/superpowers/plans/`:
+
+| Area | Plan |
+|---|---|
+| Shared contracts and root build | `2026-06-27-common.md` |
+| APK decompilation | `2026-06-27-decompiler.md` |
+| Java source parsing / AST index | `2026-06-27-parser.md` |
+| Manifest facts extraction | `2026-06-27-manifest-facts.md` |
+| External rule assets | `2026-06-27-rules.md` |
+| Taint/dataflow engine | `2026-06-27-taint.md` |
+| Manifest misconfiguration analyzer | `2026-06-27-manifest-misconfig.md` |
+| HTML/SARIF reporter | `2026-06-27-reporter.md` |
+| Temporal orchestration and docker-compose runtime | `2026-06-27-orchestrator.md` |
+| OVAA/DroidBench benchmark and E2E validation | `2026-06-27-benchmark.md` |
+
+Recommended execution order: `common`, `decompiler`, `parser`, `manifest-facts`, `taint`, `manifest-misconfig`, `rules`, `reporter`, `orchestrator`, `benchmark`. Some plans can be implemented in parallel after `common`, but cross-plan validation tests will stay red until their dependencies exist.
 
 ---
 
