@@ -4,6 +4,7 @@ import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
@@ -102,7 +103,33 @@ public final class AstIndex {
         throw new UnsupportedOperationException("implemented in Task 4");
     }
 
+    /**
+     * Resolve {@code call} to a FlowDroid/Soot-style signature
+     * {@code <fully.qualified.Class: ReturnType name(ParamType,...)>}, or {@link Optional#empty()}
+     * when the receiver/method cannot be resolved. Deep helper: stays silent and never throws
+     * (fail-soft, error-handling conventions §4).
+     */
     public Optional<String> resolveSignature(MethodCallExpr call) {
-        throw new UnsupportedOperationException("implemented in Task 3");
+        try {
+            ResolvedMethodDeclaration decl = call.resolve();
+            return Optional.of(toFlowDroidSignature(decl));
+        } catch (RuntimeException e) {
+            // UnsolvedSymbolException and any resolver failure -> fail-soft.
+            return Optional.empty();
+        }
+    }
+
+    private static String toFlowDroidSignature(ResolvedMethodDeclaration decl) {
+        StringBuilder params = new StringBuilder();
+        for (int i = 0; i < decl.getNumberOfParams(); i++) {
+            if (i > 0) {
+                params.append(',');
+            }
+            params.append(decl.getParam(i).getType().describe());
+        }
+        return "<" + decl.declaringType().getQualifiedName()
+            + ": " + decl.getReturnType().describe()
+            + " " + decl.getName()
+            + "(" + params + ")>";
     }
 }
