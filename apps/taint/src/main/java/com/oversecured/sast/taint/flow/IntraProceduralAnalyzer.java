@@ -48,9 +48,11 @@ public final class IntraProceduralAnalyzer {
     private final RuleMatcher matcher;
     private final Rule rule;
     private final List<MethodSummary> summaries;
+    private final java.util.Map<String, MethodSummary> summaryBySignature;
 
     private List<CandidateFinding> findings;
     private String currentComponent;
+    private boolean sawTaintedReturn;
 
     public IntraProceduralAnalyzer(AstIndex index, RuleMatcher matcher, Rule rule,
                                    List<MethodSummary> summaries) {
@@ -58,6 +60,25 @@ public final class IntraProceduralAnalyzer {
         this.matcher = matcher;
         this.rule = rule;
         this.summaries = List.copyOf(summaries);
+        java.util.Map<String, MethodSummary> map = new java.util.HashMap<>();
+        for (MethodSummary s : this.summaries) {
+            map.put(s.canonicalMethodSignature(), s);
+        }
+        this.summaryBySignature = map;
+    }
+
+    /**
+     * Summary-computation probe: returns whether tainting {@code paramIndex} alone makes any
+     * return expression of {@code method} tainted, under the currently-known summaries.
+     */
+    public boolean returnsTaintedForParam(MethodDeclaration method, int paramIndex) {
+        this.findings = new ArrayList<>();
+        this.currentComponent = null;
+        this.sawTaintedReturn = false;
+        String paramName = method.getParameter(paramIndex).getNameAsString();
+        TaintState seed = TaintState.empty().taint(AccessPath.of(paramName), new FlowTrace());
+        method.getBody().ifPresent(body -> exec(body, seed));
+        return sawTaintedReturn;
     }
 
     public List<CandidateFinding> analyzeMethod(MethodDeclaration method) {
@@ -120,7 +141,11 @@ public final class IntraProceduralAnalyzer {
             return result;
         }
         if (stmt instanceof ReturnStmt rs) {
-            rs.getExpression().ifPresent(e -> eval(e, state));
+            rs.getExpression().ifPresent(e -> {
+                if (eval(e, state).isPresent()) {
+                    sawTaintedReturn = true;
+                }
+            });
             return state;
         }
         // unsupported statement: walk nested expressions for side effects only
@@ -286,10 +311,19 @@ public final class IntraProceduralAnalyzer {
         return applySummary(mce, resolved, scopeTrace, argTraces);
     }
 
-    /** Hook for method-summary application (Task 8); base behavior taints nothing. */
-    protected Optional<FlowTrace> applySummary(MethodCallExpr mce, String resolvedSignature,
-                                               Optional<FlowTrace> scopeTrace,
-                                               List<Optional<FlowTrace>> argTraces) {
+    /** Apply a method summary: if a parameter that taints the return is tainted, taint the result. */
+    private Optional<FlowTrace> applySummary(MethodCallExpr mce, String resolvedSignature,
+                                             Optional<FlowTrace> scopeTrace,
+                                             List<Optional<FlowTrace>> argTraces) {
+        MethodSummary summary = summaryBySignature.get(resolvedSignature);
+        if (summary == null) {
+            return Optional.empty();
+        }
+        for (int i : summary.returnTaintedIfParamsTainted()) {
+            if (i >= 0 && i < argTraces.size() && argTraces.get(i).isPresent()) {
+                return Optional.of(argTraces.get(i).get().addStep(step(mce, "via summary: " + mce)));
+            }
+        }
         return Optional.empty();
     }
 
