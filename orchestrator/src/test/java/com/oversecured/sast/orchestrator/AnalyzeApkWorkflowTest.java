@@ -9,18 +9,22 @@ import com.oversecured.sast.orchestrator.activities.MisconfigActivityInput;
 import com.oversecured.sast.orchestrator.activities.ParseActivityInput;
 import com.oversecured.sast.orchestrator.activities.PipelineActivities;
 import com.oversecured.sast.orchestrator.activities.ReportActivityInput;
-import com.oversecured.sast.orchestrator.activities.ReportArtifacts;
-import com.oversecured.sast.orchestrator.activities.TaintActivityInput;
 import com.oversecured.sast.orchestrator.activities.TaintBatchActivityInput;
+import com.oversecured.sast.orchestrator.status.NodeStatus;
+import com.oversecured.sast.orchestrator.status.RunStatus;
+import com.oversecured.sast.orchestrator.status.StepResult;
+import com.oversecured.sast.orchestrator.status.StepState;
 import com.oversecured.sast.orchestrator.workflow.AnalyzeApkWorkflow;
 import com.oversecured.sast.orchestrator.workflow.AnalyzeApkWorkflowImpl;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
+import io.temporal.failure.ApplicationFailure;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.worker.Worker;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -109,6 +113,58 @@ class AnalyzeApkWorkflowTest {
         assertThat(activities.reportCalled).isFalse();
     }
 
+    @Test
+    void workflowStatusReportsTypedPermanentFailure() {
+        RetryRecordingActivities activities = new RetryRecordingActivities(Integer.MAX_VALUE);
+        activities.failDecompileWithPermanentApplicationFailure = true;
+        AnalyzeApkWorkflow workflow = newWorkflow(activities);
+
+        assertThatThrownBy(() -> workflow.analyze(
+                        new AnalyzeApkRequest("/tmp/empty.apk", AnalysisPlan.defaultPlan("fail-status-1"))))
+                .hasStackTraceContaining("apk is empty");
+
+        NodeStatus decompile = workflow.getStatus().nodes().stream()
+                .filter(node -> node.id().equals("decompile"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(decompile.state()).isEqualTo(StepState.FAILED);
+        assertThat(decompile.error().kind()).isEqualTo("PERMANENT");
+        assertThat(decompile.error().message()).isEqualTo("apk is empty");
+        assertThat(activities.parseCalled).isFalse();
+    }
+
+    @Test
+    void workflowStatusQueryShowsCompletedNodesWithDurationsAndFindingCounts() {
+        RecordingActivities activities = new RecordingActivities(false);
+        AnalyzeApkWorkflow workflow = newWorkflow(activities);
+
+        workflow.analyze(new AnalyzeApkRequest(
+                "/tmp/ovaa.apk",
+                AnalysisPlan.forRules("status-1", List.of("webview"))));
+
+        RunStatus status = workflow.getStatus();
+
+        assertThat(status.runId()).isEqualTo("status-1");
+        assertThat(status.state()).isEqualTo(StepState.COMPLETED);
+        assertThat(status.nodes()).extracting(NodeStatus::id).containsExactly(
+                "decompile",
+                "parse",
+                "manifest-facts",
+                "taint",
+                "manifest-misconfig",
+                "report");
+
+        NodeStatus taint = status.nodes().stream()
+                .filter(node -> node.id().equals("taint"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(taint.state()).isEqualTo(StepState.COMPLETED);
+        assertThat(taint.startedAt()).isNotNull();
+        assertThat(taint.finishedAt()).isNotNull();
+        assertThat(taint.durationMs()).isNotNull();
+        assertThat(taint.findingCount()).isZero();
+    }
+
     private AnalyzeApkWorkflow newWorkflow(PipelineActivities activities) {
         testEnv = TestWorkflowEnvironment.newInstance();
         Worker worker = testEnv.newWorker(TaskQueues.DEFAULT);
@@ -140,72 +196,62 @@ class AnalyzeApkWorkflowTest {
         }
 
         @Override
-        public synchronized String decompile(DecompileActivityInput input) {
+        public synchronized StepResult decompile(DecompileActivityInput input) {
             calls.add("decompile:" + input.sourcesDirKey());
-            return input.sourcesDirKey();
+            return completed("decompile");
         }
 
         @Override
-        public String parseSources(ParseActivityInput input) {
+        public StepResult parseSources(ParseActivityInput input) {
             awaitFanOutIfRequired(prereqStarted);
             synchronized (this) {
                 parseAndFactsWereConcurrentlyStarted = true;
                 calls.add("parse:" + input.astIndexDirKey());
             }
-            return input.astIndexDirKey();
+            return completed("parse");
         }
 
         @Override
-        public String extractManifestFacts(ManifestFactsActivityInput input) {
+        public StepResult extractManifestFacts(ManifestFactsActivityInput input) {
             awaitFanOutIfRequired(prereqStarted);
             synchronized (this) {
                 parseAndFactsWereConcurrentlyStarted = true;
                 calls.add("manifest-facts:" + input.factsKey());
             }
-            return input.factsKey();
+            return completed("manifest-facts");
         }
 
         @Override
-        public String runTaint(TaintActivityInput input) {
+        public StepResult runTaintBatch(TaintBatchActivityInput input) {
             awaitFanOutIfRequired(analyzerStarted);
-            synchronized (this) {
-                analyzersWereConcurrentlyStarted = true;
-                calls.add("taint:" + input.analysisName() + ":" + input.findingsKey());
-            }
-            return input.findingsKey();
-        }
-
-        @Override
-        public List<String> runTaintBatch(TaintBatchActivityInput input) {
-            awaitFanOutIfRequired(analyzerStarted);
-            List<String> keys = new ArrayList<>();
+            List<String> findingsKeys = new ArrayList<>();
             List<String> names = new ArrayList<>();
             for (TaintBatchActivityInput.Rule rule : input.rules()) {
                 names.add(rule.name());
-                keys.add(rule.findingsKey());
+                findingsKeys.add(rule.findingsKey());
             }
             synchronized (this) {
                 analyzersWereConcurrentlyStarted = true;
                 calls.add("taint-batch:" + String.join(",", names));
             }
-            return keys;
+            return completed("taint", findingsKeys, 0);
         }
 
         @Override
-        public String runManifestMisconfig(MisconfigActivityInput input) {
+        public StepResult runManifestMisconfig(MisconfigActivityInput input) {
             awaitFanOutIfRequired(analyzerStarted);
             synchronized (this) {
                 analyzersWereConcurrentlyStarted = true;
                 calls.add("misconfig:" + input.analysisName() + ":" + input.findingsKey());
             }
-            return input.findingsKey();
+            return completed("manifest-misconfig", List.of(input.findingsKey()), 0);
         }
 
         @Override
-        public synchronized ReportArtifacts report(ReportActivityInput input) {
+        public synchronized StepResult report(ReportActivityInput input) {
             this.reportInput = input;
             calls.add("report:" + input.htmlKey() + ":" + input.sarifKey());
-            return new ReportArtifacts(input.htmlKey(), input.sarifKey());
+            return completed("report");
         }
 
         private void awaitFanOutIfRequired(CountDownLatch latch) {
@@ -229,6 +275,7 @@ class AnalyzeApkWorkflowTest {
         private int webviewAttempts;
         private final List<String> webviewKeys = new ArrayList<>();
         private boolean failDecompile;
+        private boolean failDecompileWithPermanentApplicationFailure;
         private boolean parseCalled;
         private boolean reportCalled;
 
@@ -237,35 +284,33 @@ class AnalyzeApkWorkflowTest {
         }
 
         @Override
-        public String decompile(DecompileActivityInput input) {
+        public StepResult decompile(DecompileActivityInput input) {
+            if (failDecompileWithPermanentApplicationFailure) {
+                throw ApplicationFailure.newNonRetryableFailure("apk is empty", "PERMANENT");
+            }
             if (failDecompile) {
                 throw new IllegalStateException("decompile failed");
             }
-            return input.sourcesDirKey();
+            return completed("decompile");
         }
 
         @Override
-        public String parseSources(ParseActivityInput input) {
+        public StepResult parseSources(ParseActivityInput input) {
             parseCalled = true;
-            return input.astIndexDirKey();
+            return completed("parse");
         }
 
         @Override
-        public String extractManifestFacts(ManifestFactsActivityInput input) {
-            return input.factsKey();
+        public StepResult extractManifestFacts(ManifestFactsActivityInput input) {
+            return completed("manifest-facts");
         }
 
         @Override
-        public String runTaint(TaintActivityInput input) {
-            return input.findingsKey();
-        }
-
-        @Override
-        public List<String> runTaintBatch(TaintBatchActivityInput input) {
+        public StepResult runTaintBatch(TaintBatchActivityInput input) {
             webviewAttempts++;
-            List<String> keys = new ArrayList<>();
+            List<String> findingsKeys = new ArrayList<>();
             for (TaintBatchActivityInput.Rule rule : input.rules()) {
-                keys.add(rule.findingsKey());
+                findingsKeys.add(rule.findingsKey());
                 if ("webview".equals(rule.name())) {
                     webviewKeys.add(rule.findingsKey());
                 }
@@ -273,18 +318,33 @@ class AnalyzeApkWorkflowTest {
             if (webviewAttempts < webviewSucceedsOnAttempt) {
                 throw new IllegalStateException("temporary taint failure");
             }
-            return keys;
+            return completed("taint", findingsKeys, 0);
         }
 
         @Override
-        public String runManifestMisconfig(MisconfigActivityInput input) {
-            return input.findingsKey();
+        public StepResult runManifestMisconfig(MisconfigActivityInput input) {
+            return completed("manifest-misconfig", List.of(input.findingsKey()), 0);
         }
 
         @Override
-        public ReportArtifacts report(ReportActivityInput input) {
+        public StepResult report(ReportActivityInput input) {
             reportCalled = true;
-            return new ReportArtifacts(input.htmlKey(), input.sarifKey());
+            return completed("report");
         }
+    }
+
+    private static StepResult completed(String nodeId) {
+        return completed(nodeId, List.of(), 0);
+    }
+
+    private static StepResult completed(String nodeId, List<String> findingsKeys, int findingCount) {
+        return StepResult.completed(
+                nodeId,
+                "Completed " + nodeId + ".",
+                Map.of(),
+                List.of(),
+                findingsKeys,
+                findingCount,
+                Map.of());
     }
 }
