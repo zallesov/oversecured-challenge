@@ -32,6 +32,33 @@ services:
     ports:
       - "8080:8080"
 
+  ui-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ui
+      POSTGRES_PASSWORD: ui
+      POSTGRES_DB: ui
+    volumes:
+      - ui-postgres:/var/lib/postgresql/data
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    depends_on:
+      - temporal
+      - ui-postgres
+    environment:
+      DATABASE_URL: postgres://ui:ui@ui-postgres:5432/ui
+      TEMPORAL_ADDRESS: temporal:7233
+      ARTIFACT_ROOT: /workspace/artifacts
+      JWT_SECRET: local-dev-secret
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./artifacts:/workspace/artifacts
+
   worker:
     build:
       context: .
@@ -68,3 +95,4 @@ services:
 
 volumes:
   temporal-postgres:
+  ui-postgres:

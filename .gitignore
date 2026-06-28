@@ -16,3 +16,8 @@ bin/
 
 # Local runtime data
 minio-data/
+
+# UI
+ui/node_modules/
+ui/dist/
+ui/.env

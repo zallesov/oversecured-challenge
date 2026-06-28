@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+dist
+**/dist
+*.log
+.env
+.env.*
+ui/node_modules
+ui/dist
+ui/.env
+minio-data/
