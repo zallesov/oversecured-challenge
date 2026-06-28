@@ -45,4 +45,32 @@ class SourceToolsTest {
 
         assertThat(tools.searchCode("loadUrl")).contains("p/B.java:2:");
     }
+
+    // LangChain4j's ToolExecutionResultMessage rejects blank text (ensureNotBlank), so a tool that
+    // returns "" aborts the whole agent loop. Every tool result must be non-blank.
+
+    @Test
+    void searchCodeWithNoMatchesIsNotBlank(@TempDir Path root) throws Exception {
+        Files.writeString(root.resolve("A.java"), "class A {}\n");
+        SourceTools tools = new SourceTools(root);
+
+        assertThat(tools.searchCode("nothingHere").isBlank()).isFalse();
+    }
+
+    @Test
+    void listDirOnEmptyDirIsNotBlank(@TempDir Path root) throws Exception {
+        Files.createDirectories(root.resolve("empty"));
+        SourceTools tools = new SourceTools(root);
+
+        assertThat(tools.listDir("empty").isBlank()).isFalse();
+    }
+
+    @Test
+    void readFileWithEmptyRangeIsNotBlank(@TempDir Path root) throws Exception {
+        Files.writeString(root.resolve("A.java"), "l1\nl2\n");
+        SourceTools tools = new SourceTools(root);
+
+        // start beyond end-of-file yields no lines; must still be non-blank.
+        assertThat(tools.readFile("A.java", 5, 9).isBlank()).isFalse();
+    }
 }

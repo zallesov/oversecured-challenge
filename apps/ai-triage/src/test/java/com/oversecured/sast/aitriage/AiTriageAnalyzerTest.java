@@ -35,8 +35,9 @@ class AiTriageAnalyzerTest {
 
         Path outJson = dir.resolve("ai-triage.json");
         Path outMd = dir.resolve("ai-triage.md");
-        analyzer.run(sarif, dir, outJson, outMd);
+        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd);
 
+        assertThat(outcome.status()).isEqualTo(AiTriageAnalyzer.Status.OK);
         TriageResult written = TriageJson.read(Files.readString(outJson));
         assertThat(written.items()).hasSize(1);
         assertThat(written.items().get(0).verdict()).isEqualTo(Verdict.EXPLOITABLE);
@@ -50,8 +51,9 @@ class AiTriageAnalyzerTest {
 
         Path outJson = dir.resolve("ai-triage.json");
         Path outMd = dir.resolve("ai-triage.md");
-        analyzer.run(sarif, dir, outJson, outMd);
+        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd);
 
+        assertThat(outcome.status()).isEqualTo(AiTriageAnalyzer.Status.SKIPPED);
         TriageResult written = TriageJson.read(Files.readString(outJson));
         assertThat(written.items()).isEmpty();
         assertThat(written.summary()).contains("skipped");
@@ -73,8 +75,10 @@ class AiTriageAnalyzerTest {
 
         Path outJson = dir.resolve("ai-triage.json");
         Path outMd = dir.resolve("ai-triage.md");
-        analyzer.run(sarif, dir, outJson, outMd); // must not throw
+        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd); // must not throw
 
+        assertThat(outcome.status()).isEqualTo(AiTriageAnalyzer.Status.ERROR);
+        assertThat(outcome.message()).contains("AI triage failed");
         assertThat(TriageJson.read(Files.readString(outJson)).items()).isEmpty();
     }
 }

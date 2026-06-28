@@ -44,7 +44,8 @@ public final class SourceTools {
             }
             sb.append(i).append("\t").append(lines.get(i - 1));
         }
-        return sb.toString();
+        // Tool results must be non-blank: LangChain4j's ToolExecutionResultMessage rejects "".
+        return sb.length() == 0 ? "(no lines in range)" : sb.toString();
     }
 
     @Tool("List the entries of a directory relative to the sources root.")
@@ -57,7 +58,8 @@ public final class SourceTools {
             return "ERROR: directory not found: " + relpath;
         }
         try (Stream<Path> entries = Files.list(resolved)) {
-            return entries.map(p -> p.getFileName().toString()).sorted().reduce((a, b) -> a + "\n" + b).orElse("");
+            return entries.map(p -> p.getFileName().toString()).sorted()
+                    .reduce((a, b) -> a + "\n" + b).orElse("(empty directory)");
         } catch (IOException e) {
             return "ERROR: " + e.getMessage();
         }
@@ -74,7 +76,7 @@ public final class SourceTools {
         } catch (IOException e) {
             return "ERROR: " + e.getMessage();
         }
-        return String.join("\n", matches);
+        return matches.isEmpty() ? "(no matches)" : String.join("\n", matches);
     }
 
     private void collectMatches(Path file, String query, List<String> matches) {

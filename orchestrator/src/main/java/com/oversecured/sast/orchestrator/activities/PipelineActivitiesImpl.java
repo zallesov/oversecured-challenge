@@ -7,8 +7,11 @@ import com.oversecured.sast.common.Json;
 import com.oversecured.sast.common.PipelineException;
 import com.oversecured.sast.common.Severity;
 import com.oversecured.sast.decompiler.Decompiler;
+import com.oversecured.sast.aitriage.AiTriageAnalyzer;
 import com.oversecured.sast.orchestrator.status.ArtifactRef;
+import com.oversecured.sast.orchestrator.status.StepError;
 import com.oversecured.sast.orchestrator.status.StepResult;
+import com.oversecured.sast.orchestrator.status.StepState;
 import com.oversecured.sast.parser.AstIndex;
 import com.oversecured.sast.reporter.FindingsMerger;
 import com.oversecured.sast.reporter.HtmlReportRenderer;
@@ -191,19 +194,33 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         Path sourcesDir = paths.resolveArtifactKey(input.sourcesDirKey());
         Path outJson = paths.resolveArtifactKey(input.outJsonKey());
         Path outMd = paths.resolveArtifactKey(input.outMdKey());
-        apis.aiTriage(sarif, sourcesDir, outJson, outMd);
-        return StepResult.completed(
-                "ai-triage",
-                "Generated AI triage analysis.",
-                Map.of(
-                        "aiTriageJsonWritten", Files.exists(outJson),
-                        "aiTriageMdWritten", Files.exists(outMd)),
-                List.of(
-                        new ArtifactRef("ai-triage-json", input.outJsonKey()),
-                        new ArtifactRef("ai-triage-md", input.outMdKey())),
-                List.of(),
-                0,
-                Map.of());
+        AiTriageAnalyzer.Result outcome = apis.aiTriage(sarif, sourcesDir, outJson, outMd);
+
+        Map<String, Object> metrics = Map.of(
+                "aiTriageStatus", outcome.status().name(),
+                "aiTriageJsonWritten", Files.exists(outJson),
+                "aiTriageMdWritten", Files.exists(outMd));
+        List<ArtifactRef> artifacts = List.of(
+                new ArtifactRef("ai-triage-json", input.outJsonKey()),
+                new ArtifactRef("ai-triage-md", input.outMdKey()));
+
+        // The step is fail-soft for the *pipeline* (we never throw), but a real triage error is
+        // surfaced as a FAILED node so it is visibly distinct from a clean run. The workflow runs
+        // this as a soft step, so a FAILED ai-triage node does not fail the overall scan.
+        if (outcome.status() == AiTriageAnalyzer.Status.ERROR) {
+            return new StepResult(
+                    "ai-triage",
+                    StepState.FAILED,
+                    outcome.message(),
+                    metrics,
+                    List.of(),
+                    artifacts,
+                    new StepError("AI_TRIAGE", outcome.message()),
+                    List.of(),
+                    0,
+                    Map.of());
+        }
+        return StepResult.completed("ai-triage", outcome.message(), metrics, artifacts, List.of(), 0, Map.of());
     }
 
     /** One taint rule to run in a batch: its name, resolved rule file, and resolved output file. */
@@ -223,7 +240,7 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
 
         void report(List<Path> findingsFiles, Path html, Path sarif);
 
-        void aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd);
+        AiTriageAnalyzer.Result aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd);
     }
 
     private static final class ProductionStepApis implements StepApis {
@@ -285,8 +302,8 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         }
 
         @Override
-        public void aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
-            new com.oversecured.sast.aitriage.AiTriageAnalyzer().run(sarif, sourcesDir, outJson, outMd);
+        public AiTriageAnalyzer.Result aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
+            return new AiTriageAnalyzer().run(sarif, sourcesDir, outJson, outMd);
         }
     }
 

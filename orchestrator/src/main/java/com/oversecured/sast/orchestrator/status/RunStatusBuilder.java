@@ -60,6 +60,36 @@ public class RunStatusBuilder {
         }
     }
 
+    /**
+     * Record a step that reports its own terminal state (COMPLETED or FAILED) without treating a
+     * FAILED node as a run failure. Used for optional, fail-soft steps: the node reflects what
+     * happened, but the run still completes once every node is terminal.
+     */
+    public void markSettled(StepResult result) {
+        MutableNodeStatus node = node(result.nodeId());
+        Instant now = timeSource.get();
+        if (node.startedAt == null) {
+            node.startedAt = now;
+        }
+        node.state = result.state() == StepState.FAILED ? StepState.FAILED : StepState.COMPLETED;
+        node.message = result.message();
+        node.finishedAt = now;
+        node.durationMs = Duration.between(node.startedAt, now).toMillis();
+        node.metrics = result.metrics();
+        node.diagnostics = result.diagnostics();
+        node.artifacts = result.artifacts();
+        node.error = result.error();
+        node.findingsKeys = result.findingsKeys();
+        node.findingCount = result.findingCount();
+        node.severityCounts = result.severityCounts();
+
+        if (allNodesTerminal()) {
+            runState = StepState.COMPLETED;
+            runMessage = anyNodeFailed() ? "Scan completed with warnings." : "Scan completed.";
+            runFinishedAt = now;
+        }
+    }
+
     public void markFailed(StepResult result) {
         MutableNodeStatus node = node(result.nodeId());
         Instant now = timeSource.get();
@@ -100,6 +130,15 @@ public class RunStatusBuilder {
 
     private boolean allNodesCompleted() {
         return nodesById.values().stream().allMatch(node -> node.state == StepState.COMPLETED);
+    }
+
+    private boolean allNodesTerminal() {
+        return nodesById.values().stream()
+                .allMatch(node -> node.state == StepState.COMPLETED || node.state == StepState.FAILED);
+    }
+
+    private boolean anyNodeFailed() {
+        return nodesById.values().stream().anyMatch(node -> node.state == StepState.FAILED);
     }
 
     private MutableNodeStatus node(String nodeId) {

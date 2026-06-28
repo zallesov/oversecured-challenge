@@ -162,6 +162,27 @@ class PipelineActivitiesImplTest {
     }
 
     @Test
+    void aiTriageErrorOutcomeProducesFailedNodeWithArtifacts(@TempDir Path root) {
+        RecordingStepApis apis = new RecordingStepApis();
+        apis.aiTriageResult = new com.oversecured.sast.aitriage.AiTriageAnalyzer.Result(
+                com.oversecured.sast.aitriage.AiTriageAnalyzer.Status.ERROR,
+                "AI triage failed: RuntimeException: API down");
+        PipelineActivitiesImpl activities = PipelineActivitiesImpl.forTesting(root, apis);
+
+        StepResult result = activities.aiTriage(new com.oversecured.sast.orchestrator.activities.AiTriageActivityInput(
+                "runs/r1/report.sarif", "runs/r1/sources", "runs/r1/ai-triage.json", "runs/r1/ai-triage.md"));
+
+        assertThat(result.state()).isEqualTo(com.oversecured.sast.orchestrator.status.StepState.FAILED);
+        assertThat(result.error()).isNotNull();
+        assertThat(result.error().kind()).isEqualTo("AI_TRIAGE");
+        assertThat(result.message()).contains("AI triage failed");
+        // The sidecar artifacts are still surfaced on a failed node.
+        assertThat(result.artifacts()).containsExactly(
+                new ArtifactRef("ai-triage-json", "runs/r1/ai-triage.json"),
+                new ArtifactRef("ai-triage-md", "runs/r1/ai-triage.md"));
+    }
+
+    @Test
     void permanentPipelineFailureBecomesNonRetryableApplicationFailure(@TempDir Path root) throws Exception {
         RecordingStepApis apis = new RecordingStepApis();
         apis.decompileFailure = new PipelineException(FailureKind.PERMANENT, "apk is empty");
@@ -254,8 +275,13 @@ class PipelineActivitiesImplTest {
             }
         }
 
+        private com.oversecured.sast.aitriage.AiTriageAnalyzer.Result aiTriageResult =
+                new com.oversecured.sast.aitriage.AiTriageAnalyzer.Result(
+                        com.oversecured.sast.aitriage.AiTriageAnalyzer.Status.OK, "AI triage analyzed 1 findings.");
+
         @Override
-        public void aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
+        public com.oversecured.sast.aitriage.AiTriageAnalyzer.Result aiTriage(
+                Path sarif, Path sourcesDir, Path outJson, Path outMd) {
             calls.add("aitriage:" + sarif + "->" + outJson + ":" + outMd);
             try {
                 Files.createDirectories(outJson.getParent());
@@ -264,6 +290,7 @@ class PipelineActivitiesImplTest {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+            return aiTriageResult;
         }
 
         private static Finding finding(String ruleId, Severity severity) {

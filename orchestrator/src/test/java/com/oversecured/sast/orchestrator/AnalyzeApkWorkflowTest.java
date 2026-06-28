@@ -171,6 +171,26 @@ class AnalyzeApkWorkflowTest {
         assertThat(taint.findingCount()).isZero();
     }
 
+    @Test
+    void aiTriageFailureMarksNodeFailedButRunCompletes() {
+        RecordingActivities activities = new RecordingActivities(false);
+        activities.aiTriageFails = true;
+        AnalyzeApkWorkflow workflow = newWorkflow(activities);
+
+        workflow.analyze(new AnalyzeApkRequest(
+                "/tmp/ovaa.apk", AnalysisPlan.forRules("soft-1", List.of("webview"))));
+
+        RunStatus status = workflow.getStatus();
+        assertThat(status.state()).isEqualTo(StepState.COMPLETED);
+
+        NodeStatus aiTriage = status.nodes().stream()
+                .filter(node -> node.id().equals("ai-triage"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(aiTriage.state()).isEqualTo(StepState.FAILED);
+        assertThat(aiTriage.error().kind()).isEqualTo("AI_TRIAGE");
+    }
+
     private AnalyzeApkWorkflow newWorkflow(PipelineActivities activities) {
         testEnv = TestWorkflowEnvironment.newInstance();
         Worker worker = testEnv.newWorker(TaskQueues.DEFAULT);
@@ -260,10 +280,25 @@ class AnalyzeApkWorkflowTest {
             return completed("report");
         }
 
+        private boolean aiTriageFails;
+
         @Override
         public synchronized StepResult aiTriage(
                 com.oversecured.sast.orchestrator.activities.AiTriageActivityInput input) {
             calls.add("aitriage:" + input.outJsonKey() + ":" + input.outMdKey());
+            if (aiTriageFails) {
+                return new StepResult(
+                        "ai-triage",
+                        StepState.FAILED,
+                        "AI triage failed: boom",
+                        Map.of(),
+                        List.of(),
+                        List.of(),
+                        new com.oversecured.sast.orchestrator.status.StepError("AI_TRIAGE", "boom"),
+                        List.of(),
+                        0,
+                        Map.of());
+            }
             return completed("ai-triage");
         }
 

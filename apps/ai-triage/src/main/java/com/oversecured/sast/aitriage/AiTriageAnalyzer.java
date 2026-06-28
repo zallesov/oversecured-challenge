@@ -19,23 +19,44 @@ public final class AiTriageAnalyzer {
         this.factory = factory;
     }
 
-    public void run(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
+    /** Outcome of a triage run. Never an exception — the step is fail-soft. */
+    public enum Status {
+        /** The engine ran and produced a verdict for at least one finding. */
+        OK,
+        /** Benign skip: no API key configured, or no findings to triage. */
+        SKIPPED,
+        /** The engine was available but failed (API/parse/tool error). The sidecar explains why. */
+        ERROR
+    }
+
+    public record Result(Status status, String message) {
+    }
+
+    /** Always writes both sidecar files and returns an outcome; never throws. */
+    public Result run(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
         TriageResult result;
+        Result outcome;
         try {
             List<TriageFinding> findings = new SarifFindings().parse(sarif);
             TriageEngine engine = factory.create(sourcesDir);
             if (engine == null) {
                 result = empty("AI triage skipped: no engine available (set OPENROUTER_API_KEY).");
+                outcome = new Result(Status.SKIPPED, result.summary());
             } else if (findings.isEmpty()) {
                 result = empty("AI triage skipped: no findings to analyze.");
+                outcome = new Result(Status.SKIPPED, result.summary());
             } else {
                 result = engine.triage(findings);
+                outcome = new Result(Status.OK,
+                        "AI triage analyzed " + result.items().size() + " findings.");
             }
         } catch (Exception e) {
-            result = empty("AI triage skipped: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            result = empty("AI triage failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            outcome = new Result(Status.ERROR, result.summary());
         }
         writeSoft(outJson, TriageJson.write(result));
         writeSoft(outMd, MarkdownRenderer.render(result));
+        return outcome;
     }
 
     private TriageResult empty(String summary) {

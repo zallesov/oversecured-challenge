@@ -111,7 +111,9 @@ public final class AnalyzeApkWorkflowImpl implements AnalyzeApkWorkflow {
                 plan.report().htmlKey(),
                 plan.report().sarifKey())));
 
-        runStep(AI_TRIAGE, "Running AI triage.", () -> activities.aiTriage(new AiTriageActivityInput(
+        // Soft step: the activity is fail-soft and returns a settled StepResult (COMPLETED or
+        // FAILED). A FAILED ai-triage node is recorded as-is but never fails the overall scan.
+        runSoftStep(AI_TRIAGE, "Running AI triage.", () -> activities.aiTriage(new AiTriageActivityInput(
                 plan.report().sarifKey(),
                 plan.keys().sourcesDirKey(),
                 plan.report().aiTriageJsonKey(),
@@ -148,6 +150,28 @@ public final class AnalyzeApkWorkflowImpl implements AnalyzeApkWorkflow {
         } catch (RuntimeException e) {
             markFailed(nodeId, e);
             throw e;
+        }
+    }
+
+    /**
+     * Run a step that reports its own outcome and must not fail the scan. The activity is expected
+     * never to throw; its returned StepResult (COMPLETED or FAILED) is recorded verbatim.
+     */
+    private StepResult runSoftStep(String nodeId, String message, ActivityCall call) {
+        status.markRunning(nodeId, message);
+        try {
+            StepResult result = call.call();
+            status.markSettled(result);
+            return result;
+        } catch (RuntimeException e) {
+            // Defensive: a soft step should not throw, but if it does, record it without failing
+            // the run so a single optional step cannot sink an otherwise complete scan.
+            StepResult failure = StepResult.failed(
+                    nodeId,
+                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(),
+                    new StepError("UNKNOWN", e.getMessage()));
+            status.markSettled(failure);
+            return failure;
         }
     }
 
