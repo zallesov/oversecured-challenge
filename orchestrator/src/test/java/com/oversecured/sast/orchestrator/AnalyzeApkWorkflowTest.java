@@ -52,7 +52,9 @@ class AnalyzeApkWorkflowTest {
 
         assertThat(result).isEqualTo(new AnalysisResult(
                 "runs/run-1/report.html",
-                "runs/run-1/report.sarif"));
+                "runs/run-1/report.sarif",
+                "runs/run-1/ai-triage.json",
+                "runs/run-1/ai-triage.md"));
 
         assertThat(activities.calls.get(0)).isEqualTo("decompile:runs/run-1/sources");
         assertThat(activities.calls.subList(1, 3)).containsExactlyInAnyOrder(
@@ -61,7 +63,10 @@ class AnalyzeApkWorkflowTest {
         assertThat(activities.calls.subList(3, 5)).containsExactlyInAnyOrder(
                 "taint-batch:webview,pathtraversal",
                 "misconfig:manifest-misconfig:runs/run-1/findings-misconfig.json");
-        assertThat(activities.calls).endsWith("report:runs/run-1/report.html:runs/run-1/report.sarif");
+        assertThat(activities.calls).containsSubsequence(
+                "report:runs/run-1/report.html:runs/run-1/report.sarif",
+                "aitriage:runs/run-1/ai-triage.json:runs/run-1/ai-triage.md");
+        assertThat(activities.calls).endsWith("aitriage:runs/run-1/ai-triage.json:runs/run-1/ai-triage.md");
 
         assertThat(activities.reportInput.findingsKeys()).containsExactly(
                 "runs/run-1/findings-webview.json",
@@ -152,7 +157,8 @@ class AnalyzeApkWorkflowTest {
                 "manifest-facts",
                 "taint",
                 "manifest-misconfig",
-                "report");
+                "report",
+                "ai-triage");
 
         NodeStatus taint = status.nodes().stream()
                 .filter(node -> node.id().equals("taint"))
@@ -254,6 +260,13 @@ class AnalyzeApkWorkflowTest {
             return completed("report");
         }
 
+        @Override
+        public synchronized StepResult aiTriage(
+                com.oversecured.sast.orchestrator.activities.AiTriageActivityInput input) {
+            calls.add("aitriage:" + input.outJsonKey() + ":" + input.outMdKey());
+            return completed("ai-triage");
+        }
+
         private void awaitFanOutIfRequired(CountDownLatch latch) {
             if (!requireConcurrentFanOut) {
                 return;
@@ -330,6 +343,11 @@ class AnalyzeApkWorkflowTest {
         public StepResult report(ReportActivityInput input) {
             reportCalled = true;
             return completed("report");
+        }
+
+        @Override
+        public StepResult aiTriage(com.oversecured.sast.orchestrator.activities.AiTriageActivityInput input) {
+            return completed("ai-triage");
         }
     }
 

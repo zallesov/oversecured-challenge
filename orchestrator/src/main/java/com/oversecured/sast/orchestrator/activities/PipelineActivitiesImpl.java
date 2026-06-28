@@ -185,6 +185,27 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         });
     }
 
+    @Override
+    public StepResult aiTriage(AiTriageActivityInput input) {
+        Path sarif = paths.resolveArtifactKey(input.sarifKey());
+        Path sourcesDir = paths.resolveArtifactKey(input.sourcesDirKey());
+        Path outJson = paths.resolveArtifactKey(input.outJsonKey());
+        Path outMd = paths.resolveArtifactKey(input.outMdKey());
+        apis.aiTriage(sarif, sourcesDir, outJson, outMd);
+        return StepResult.completed(
+                "ai-triage",
+                "Generated AI triage analysis.",
+                Map.of(
+                        "aiTriageJsonWritten", Files.exists(outJson),
+                        "aiTriageMdWritten", Files.exists(outMd)),
+                List.of(
+                        new ArtifactRef("ai-triage-json", input.outJsonKey()),
+                        new ArtifactRef("ai-triage-md", input.outMdKey())),
+                List.of(),
+                0,
+                Map.of());
+    }
+
     /** One taint rule to run in a batch: its name, resolved rule file, and resolved output file. */
     public record TaintRuleSpec(String name, Path ruleYaml, Path findingsJson) {
     }
@@ -201,6 +222,8 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         void runManifestMisconfig(String analysisName, Path factsJson, Path ruleYaml, Path findingsJson);
 
         void report(List<Path> findingsFiles, Path html, Path sarif);
+
+        void aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd);
     }
 
     private static final class ProductionStepApis implements StepApis {
@@ -259,6 +282,11 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
             } catch (IOException e) {
                 throw new UncheckedIOException("failed to write reports", e);
             }
+        }
+
+        @Override
+        public void aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
+            new com.oversecured.sast.aitriage.AiTriageAnalyzer().run(sarif, sourcesDir, outJson, outMd);
         }
     }
 

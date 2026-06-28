@@ -10,6 +10,7 @@ dependencies {
     implementation project(':apps:taint')
     implementation project(':apps:manifest-misconfig')
     implementation project(':apps:reporter')
+    implementation project(':apps:ai-triage')
 
     implementation "io.temporal:temporal-sdk:${rootProject.ext.temporalVersion}"
     implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"

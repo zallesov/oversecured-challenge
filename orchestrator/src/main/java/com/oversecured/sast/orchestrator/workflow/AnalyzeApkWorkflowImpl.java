@@ -5,6 +5,7 @@ import com.oversecured.sast.orchestrator.AnalysisPlan;
 import com.oversecured.sast.orchestrator.AnalysisResult;
 import com.oversecured.sast.orchestrator.AnalyzeApkRequest;
 import com.oversecured.sast.orchestrator.TaskQueues;
+import com.oversecured.sast.orchestrator.activities.AiTriageActivityInput;
 import com.oversecured.sast.orchestrator.activities.DecompileActivityInput;
 import com.oversecured.sast.orchestrator.activities.ManifestFactsActivityInput;
 import com.oversecured.sast.orchestrator.activities.MisconfigActivityInput;
@@ -35,6 +36,7 @@ public final class AnalyzeApkWorkflowImpl implements AnalyzeApkWorkflow {
     private static final String TAINT = "taint";
     private static final String MANIFEST_MISCONFIG = "manifest-misconfig";
     private static final String REPORT = "report";
+    private static final String AI_TRIAGE = "ai-triage";
 
     private final PipelineActivities activities = Workflow.newActivityStub(
             PipelineActivities.class,
@@ -109,7 +111,17 @@ public final class AnalyzeApkWorkflowImpl implements AnalyzeApkWorkflow {
                 plan.report().htmlKey(),
                 plan.report().sarifKey())));
 
-        return new AnalysisResult(plan.report().htmlKey(), plan.report().sarifKey());
+        runStep(AI_TRIAGE, "Running AI triage.", () -> activities.aiTriage(new AiTriageActivityInput(
+                plan.report().sarifKey(),
+                plan.keys().sourcesDirKey(),
+                plan.report().aiTriageJsonKey(),
+                plan.report().aiTriageMdKey())));
+
+        return new AnalysisResult(
+                plan.report().htmlKey(),
+                plan.report().sarifKey(),
+                plan.report().aiTriageJsonKey(),
+                plan.report().aiTriageMdKey());
     }
 
     @Override
@@ -209,7 +221,8 @@ public final class AnalyzeApkWorkflowImpl implements AnalyzeApkWorkflow {
                 new RunStatusBuilder.NodeDefinition(MANIFEST_FACTS, "Manifest Facts", "preparation"),
                 new RunStatusBuilder.NodeDefinition(TAINT, "Taint Analysis", "analyzer"),
                 new RunStatusBuilder.NodeDefinition(MANIFEST_MISCONFIG, "Manifest Misconfiguration", "analyzer"),
-                new RunStatusBuilder.NodeDefinition(REPORT, "Report", "report"));
+                new RunStatusBuilder.NodeDefinition(REPORT, "Report", "report"),
+                new RunStatusBuilder.NodeDefinition(AI_TRIAGE, "AI Triage", "report"));
     }
 
     @FunctionalInterface

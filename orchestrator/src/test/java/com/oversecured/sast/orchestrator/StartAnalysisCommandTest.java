@@ -49,7 +49,11 @@ class StartAnalysisCommandTest {
             this.target = temporalTarget;
             this.workflowId = workflowId;
             this.requests.add(request);
-            return new AnalysisResult(request.plan().report().htmlKey(), request.plan().report().sarifKey());
+            return new AnalysisResult(
+                    request.plan().report().htmlKey(),
+                    request.plan().report().sarifKey(),
+                    request.plan().report().aiTriageJsonKey(),
+                    request.plan().report().aiTriageMdKey());
         }
     }
 }

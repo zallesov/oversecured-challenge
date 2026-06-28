@@ -55,6 +55,8 @@ public final class StartAnalysisCommand implements Callable<Integer> {
         AnalysisResult result = starter.start(temporalTarget, workflowId, new AnalyzeApkRequest(apk, plan));
         System.out.println("html=" + result.htmlReportKey());
         System.out.println("sarif=" + result.sarifReportKey());
+        System.out.println("aiTriageJson=" + result.aiTriageJsonKey());
+        System.out.println("aiTriageMd=" + result.aiTriageMdKey());
         return 0;
     }
 

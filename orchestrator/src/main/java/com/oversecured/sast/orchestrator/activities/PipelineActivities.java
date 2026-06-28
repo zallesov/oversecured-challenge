@@ -25,4 +25,7 @@ public interface PipelineActivities {
 
     @ActivityMethod
     StepResult report(ReportActivityInput input);
+
+    @ActivityMethod
+    StepResult aiTriage(AiTriageActivityInput input);
 }

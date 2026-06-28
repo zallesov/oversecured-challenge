@@ -141,6 +141,27 @@ class PipelineActivitiesImplTest {
     }
 
     @Test
+    void aiTriageResolvesKeysAndReturnsArtifacts(@TempDir Path root) {
+        RecordingStepApis apis = new RecordingStepApis();
+        PipelineActivitiesImpl activities = PipelineActivitiesImpl.forTesting(root, apis);
+
+        StepResult result = activities.aiTriage(new com.oversecured.sast.orchestrator.activities.AiTriageActivityInput(
+                "runs/r1/report.sarif",
+                "runs/r1/sources",
+                "runs/r1/ai-triage.json",
+                "runs/r1/ai-triage.md"));
+
+        assertThat(result.nodeId()).isEqualTo("ai-triage");
+        assertThat(result.artifacts()).containsExactly(
+                new ArtifactRef("ai-triage-json", "runs/r1/ai-triage.json"),
+                new ArtifactRef("ai-triage-md", "runs/r1/ai-triage.md"));
+        assertThat(apis.calls).containsExactly(
+                "aitriage:" + root.resolve("runs/r1/report.sarif").toAbsolutePath().normalize()
+                        + "->" + root.resolve("runs/r1/ai-triage.json").toAbsolutePath().normalize()
+                        + ":" + root.resolve("runs/r1/ai-triage.md").toAbsolutePath().normalize());
+    }
+
+    @Test
     void permanentPipelineFailureBecomesNonRetryableApplicationFailure(@TempDir Path root) throws Exception {
         RecordingStepApis apis = new RecordingStepApis();
         apis.decompileFailure = new PipelineException(FailureKind.PERMANENT, "apk is empty");
@@ -228,6 +249,18 @@ class PipelineActivitiesImplTest {
                 Files.createDirectories(html.getParent());
                 Files.writeString(html, "<html></html>");
                 Files.writeString(sarif, "{}");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        public void aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
+            calls.add("aitriage:" + sarif + "->" + outJson + ":" + outMd);
+            try {
+                Files.createDirectories(outJson.getParent());
+                Files.writeString(outJson, "{\"items\":[]}");
+                Files.writeString(outMd, "# AI Triage\n");
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
