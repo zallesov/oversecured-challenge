@@ -16,8 +16,10 @@ bin/
 
 # Local runtime data
 minio-data/
+artifacts/
 
 # UI
 ui/node_modules/
 ui/dist/
 ui/.env
+.env.server
