@@ -48,6 +48,27 @@ public final class TriagePrompt {
             Do not drop or merge findings; every input gets exactly one verdict. The verdict
             must be one of exploitable, needs-review, safe. The severity must be one of
             critical, high, medium, low, info.
+
+            OUTPUT FORMAT — respond with a single JSON object and NOTHING else. No prose, no
+            markdown, no ``` fences. The object must match exactly this shape:
+
+            {
+              "summary": "<one-paragraph overview of the triage>",
+              "items": [
+                {
+                  "ref": { "ruleId": "<rule id>", "file": "<file>", "line": <int> },
+                  "verdict": "exploitable" | "needs-review" | "safe",
+                  "severity": "critical" | "high" | "medium" | "low" | "info",
+                  "confidence": <number between 0 and 1>,
+                  "rationale": "<why>",
+                  "fix": "<concrete code-level fix>",
+                  "references": ["CWE-###", "M#", ...]
+                }
+              ]
+            }
+
+            Use the verdict/severity strings in lowercase exactly as shown. Emit one items[]
+            entry per input finding.
             """;
 
     public static String renderFindings(List<TriageFinding> findings) {

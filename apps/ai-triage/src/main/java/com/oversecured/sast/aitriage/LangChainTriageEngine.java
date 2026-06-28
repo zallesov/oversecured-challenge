@@ -39,6 +39,11 @@ public final class LangChainTriageEngine implements TriageEngine {
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
                 .modelName(model)
+                // Force valid-JSON output. Over OpenRouter's OpenAI-compatible shim the model
+                // otherwise wraps its answer in prose / a ```json fence (or omits JSON entirely),
+                // which breaks parsing. json_object mode makes the final message a bare JSON object.
+                // Supported by the structured-output Claude models (Haiku/Sonnet/Opus 4.5+).
+                .responseFormat("json_object")
                 .build();
         TriageAiService service = AiServices.builder(TriageAiService.class)
                 .chatModel(chatModel)
