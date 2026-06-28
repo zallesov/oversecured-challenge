@@ -267,6 +267,27 @@ public final class IntraProceduralAnalyzer {
             }
             return t.isPresent() ? state.taint(path, t.get()) : state.kill(path);
         }
+        // Carrier call (e.g. Intent.putExtra): a tainted argument taints the receiver object, so a
+        // later sink on that variable (sendBroadcast(i)/startActivity(i)) fires. Handled here at the
+        // statement level because the call's result is discarded — tainting the return would be lost.
+        if (expr instanceof MethodCallExpr carrier && carrier.getScope().isPresent()) {
+            Optional<String> sig = index.resolveSignature(carrier);
+            if (sig.isPresent() && matcher.isCarrier(sig.get())) {
+                AccessPath recv = targetPath(carrier.getScope().get());
+                eval(carrier.getScope().get(), state); // scope side effects
+                Optional<FlowTrace> taintedArg = Optional.empty();
+                for (Expression arg : carrier.getArguments()) {
+                    Optional<FlowTrace> t = eval(arg, state); // arg side effects (nested sinks)
+                    if (taintedArg.isEmpty() && t.isPresent()) {
+                        taintedArg = t;
+                    }
+                }
+                if (recv != null && taintedArg.isPresent()) {
+                    return state.taint(recv, taintedArg.get().addStep(step(carrier, "carrier: " + carrier)));
+                }
+                return state;
+            }
+        }
         eval(expr, state); // standalone call etc. — side effects (sinks)
         return state;
     }

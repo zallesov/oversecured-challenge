@@ -25,7 +25,8 @@ public record AnalysisPlan(
             "intent-redirect",
             "file-theft",
             "login-url-injection",
-            "credential-log-leak");
+            "credential-log-leak",
+            "credential-intent-exfil");
 
     public AnalysisPlan {
         taintAnalyses = List.copyOf(taintAnalyses);

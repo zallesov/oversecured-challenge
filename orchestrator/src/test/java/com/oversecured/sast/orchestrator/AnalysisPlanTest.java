@@ -20,12 +20,13 @@ class AnalysisPlanTest {
         assertThat(plan.taintAnalyses())
                 .extracting(AnalysisPlan.TaintAnalysis::name)
                 .containsExactly("webview", "pathtraversal", "intent-redirect", "file-theft",
-                        "login-url-injection", "credential-log-leak");
+                        "login-url-injection", "credential-log-leak", "credential-intent-exfil");
         assertThat(plan.taintAnalyses())
                 .extracting(AnalysisPlan.TaintAnalysis::rulePath)
                 .containsExactly("rules/webview.yaml", "rules/pathtraversal.yaml",
                         "rules/intent-redirect.yaml", "rules/file-theft.yaml",
-                        "rules/login-url-injection.yaml", "rules/credential-log-leak.yaml");
+                        "rules/login-url-injection.yaml", "rules/credential-log-leak.yaml",
+                        "rules/credential-intent-exfil.yaml");
         assertThat(plan.taintAnalyses())
                 .extracting(AnalysisPlan.TaintAnalysis::findingsKey)
                 .containsExactly(
@@ -34,7 +35,8 @@ class AnalysisPlanTest {
                         "runs/ovaa-001/findings-intent-redirect.json",
                         "runs/ovaa-001/findings-file-theft.json",
                         "runs/ovaa-001/findings-login-url-injection.json",
-                        "runs/ovaa-001/findings-credential-log-leak.json");
+                        "runs/ovaa-001/findings-credential-log-leak.json",
+                        "runs/ovaa-001/findings-credential-intent-exfil.json");
 
         assertThat(plan.manifestMisconfig().rulePath()).isEqualTo("rules/misconfig.yaml");
         assertThat(plan.manifestMisconfig().findingsKey()).isEqualTo("runs/ovaa-001/findings-misconfig.json");
@@ -54,6 +56,7 @@ class AnalysisPlanTest {
                         "runs/run-7/findings-file-theft.json",
                         "runs/run-7/findings-login-url-injection.json",
                         "runs/run-7/findings-credential-log-leak.json",
+                        "runs/run-7/findings-credential-intent-exfil.json",
                         "runs/run-7/findings-misconfig.json");
     }
 

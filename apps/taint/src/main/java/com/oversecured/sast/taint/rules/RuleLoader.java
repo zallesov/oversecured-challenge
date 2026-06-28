@@ -72,6 +72,9 @@ public final class RuleLoader {
         for (String propagator : rule.getPropagators()) {
             RuleSignatures.parseMethod(propagator);
         }
+        for (String carrier : rule.getCarriers()) {
+            RuleSignatures.parseMethod(carrier);
+        }
     }
 
     private void requireNonBlank(String value, String field, Path rulePath) {

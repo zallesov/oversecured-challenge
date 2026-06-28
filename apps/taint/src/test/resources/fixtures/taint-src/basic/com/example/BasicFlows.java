@@ -35,4 +35,19 @@ public class BasicFlows {
             webView.loadUrl(url);
         }
     }
+
+    // Carrier: tainted value put into an Intent taints the Intent, which then reaches a sink.
+    public void carrier(Intent intent, Dispatcher dispatcher) {
+        String secret = intent.getStringExtra("creds");
+        Intent out = new Intent();
+        out.putExtra("k", secret);
+        dispatcher.sendBroadcast(out);
+    }
+
+    // Negative: the carried value is untainted, so the Intent never becomes tainted.
+    public void carrierUntainted(Intent intent, Dispatcher dispatcher) {
+        Intent out = new Intent();
+        out.putExtra("k", "clean");
+        dispatcher.sendBroadcast(out);
+    }
 }

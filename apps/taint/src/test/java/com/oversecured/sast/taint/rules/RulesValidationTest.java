@@ -140,6 +140,7 @@ class RulesValidationTest {
         RuleFile fileTheft = loadRuleFile("file-theft.yaml");
         RuleFile loginUrl = loadRuleFile("login-url-injection.yaml");
         RuleFile credLog = loadRuleFile("credential-log-leak.yaml");
+        RuleFile credIntentExfil = loadRuleFile("credential-intent-exfil.yaml");
 
         // webview.yaml: loadUrl sink arg[0] + >=2 Intent sources
         SinkSpec loadUrl = webview.getRules().get(0).getSinks().stream()
@@ -165,7 +166,7 @@ class RulesValidationTest {
 
         // 3. Every source/sink/sanitizer signature in all taint files parses via the rule loader adapter.
         for (RuleFile rf : java.util.List.of(webview, pathtrav, sqlite, jsBridge,
-                intentRedirect, fileTheft, loginUrl, credLog)) {
+                intentRedirect, fileTheft, loginUrl, credLog, credIntentExfil)) {
             for (Rule rule : rf.getRules()) {
                 for (SourceSpec src : rule.getSources()) {
                     assertNotNull(RuleSignatures.parseMethod(src.getSignature()),
@@ -184,6 +185,10 @@ class RulesValidationTest {
                         assertNotNull(RuleSignatures.parseMethod(prop),
                                 "propagator did not parse: " + prop);
                     }
+                }
+                for (String carrier : rule.getCarriers()) {
+                    assertNotNull(RuleSignatures.parseMethod(carrier),
+                            "carrier did not parse: " + carrier);
                 }
             }
         }

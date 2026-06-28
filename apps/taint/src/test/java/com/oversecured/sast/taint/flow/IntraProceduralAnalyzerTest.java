@@ -80,6 +80,38 @@ class IntraProceduralAnalyzerTest {
         assertThat(findings).isEmpty();
     }
 
+    private static Rule carrierRule() {
+        return new Rule(
+                "R", "sensitive-data-exfiltration", Severity.ERROR, "CWE-200", "M2", "msg",
+                new ManifestConditions(false),
+                List.of(new SourceSpec("android.content.Intent: java.lang.String getStringExtra(java.lang.String)")),
+                List.of(new SinkSpec("com.example.Dispatcher: void sendBroadcast(android.content.Intent)", List.of(0))),
+                List.of(),
+                List.of(),
+                List.of("android.content.Intent: android.content.Intent putExtra(java.lang.String,java.lang.String)"));
+    }
+
+    @Test
+    void carrierTaintsIntentSoLaterSinkOnItReports() {
+        AstIndex index = AstIndex.build(Path.of("src/test/resources/fixtures/taint-src/basic"));
+        var findings = new IntraProceduralAnalyzer(index, RuleMatcher.forRule(carrierRule()), carrierRule(), List.of())
+                .analyzeMethod(method(index, "carrier"));
+
+        assertThat(findings).hasSize(1);
+        assertThat(findings.get(0).flow()).extracting(step -> step.label())
+                .anySatisfy(label -> assertThat(label).contains("carrier"))
+                .anySatisfy(label -> assertThat(label).contains("sink"));
+    }
+
+    @Test
+    void carrierWithUntaintedValueDoesNotReport() {
+        AstIndex index = AstIndex.build(Path.of("src/test/resources/fixtures/taint-src/basic"));
+        var findings = new IntraProceduralAnalyzer(index, RuleMatcher.forRule(carrierRule()), carrierRule(), List.of())
+                .analyzeMethod(method(index, "carrierUntainted"));
+
+        assertThat(findings).isEmpty();
+    }
+
     @Test
     void incompleteEndsWithSanitizerStillReportsWithNote() {
         AstIndex index = AstIndex.build(Path.of("src/test/resources/fixtures/taint-src/basic"));
