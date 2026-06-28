@@ -21,9 +21,16 @@ public enum Verdict {
 
     @JsonCreator
     public static Verdict fromJson(String value) {
-        for (Verdict v : values()) {
-            if (v.json.equals(value)) {
-                return v;
+        if (value != null) {
+            String normalized = value.trim();
+            for (Verdict v : values()) {
+                // Accept the canonical label ("needs-review"), the enum name ("NEEDS_REVIEW"),
+                // and case/separator variants a model may emit over a passthrough provider.
+                if (v.json.equalsIgnoreCase(normalized)
+                        || v.name().equalsIgnoreCase(normalized)
+                        || v.name().equalsIgnoreCase(normalized.replace('-', '_'))) {
+                    return v;
+                }
             }
         }
         throw new IllegalArgumentException("unknown verdict: " + value);

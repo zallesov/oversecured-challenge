@@ -55,7 +55,7 @@ public final class AiTriageAnalyzer {
     }
 
     private static TriageEngineFactory defaultFactory() {
-        String model = System.getenv().getOrDefault("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet");
+        String model = System.getenv().getOrDefault("OPENROUTER_MODEL", "anthropic/claude-haiku-4.5");
         return sourcesDir -> LangChainTriageEngine.create(
                 System.getenv("OPENROUTER_API_KEY"),
                 "https://openrouter.ai/api/v1",

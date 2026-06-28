@@ -27,6 +27,19 @@ class TriageRenderingTest {
     }
 
     @Test
+    void readsTolerantEnumCasingAndUnknownKeys() {
+        String json = "{ \"model\": \"m\", \"extraKey\": 1, \"summary\": \"s\", \"items\": ["
+                + "{ \"ref\": {\"ruleId\":\"R\",\"file\":\"A.java\",\"line\":47},"
+                + " \"verdict\": \"EXPLOITABLE\", \"severity\": \"HIGH\", \"confidence\": 0.9,"
+                + " \"rationale\": \"r\", \"fix\": \"f\", \"references\": [] } ] }";
+
+        TriageResult r = TriageJson.read(json);
+
+        assertThat(r.items().get(0).verdict()).isEqualTo(Verdict.EXPLOITABLE);
+        assertThat(r.items().get(0).severity()).isEqualTo(TriageSeverity.HIGH);
+    }
+
+    @Test
     void markdownHasSummaryAndPerFindingSection() {
         String md = MarkdownRenderer.render(sample());
 

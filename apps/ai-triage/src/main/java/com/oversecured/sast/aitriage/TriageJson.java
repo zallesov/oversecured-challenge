@@ -1,11 +1,14 @@
 package com.oversecured.sast.aitriage;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public final class TriageJson {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    // Models over a passthrough provider may add unknown keys; ignore them rather than fail.
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     private TriageJson() {
     }

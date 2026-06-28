@@ -20,4 +20,16 @@ class LangChainTriageEngineTest {
         assertThat(engine).isNotNull();
         assertThat(engine.modelName()).isEqualTo("test-model");
     }
+
+    @Test
+    void extractsJsonFromFencedProseResponse() {
+        String reply = "Here is my analysis.\n\n```json\n{ \"summary\": \"s\", \"items\": [] }\n```\nDone.";
+        assertThat(LangChainTriageEngine.extractJson(reply)).isEqualTo("{ \"summary\": \"s\", \"items\": [] }");
+    }
+
+    @Test
+    void extractsBareJsonObjectFromProse() {
+        String reply = "Reasoning first. { \"summary\": \"s\", \"items\": [] } trailing words.";
+        assertThat(LangChainTriageEngine.extractJson(reply)).isEqualTo("{ \"summary\": \"s\", \"items\": [] }");
+    }
 }

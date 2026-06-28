@@ -42,7 +42,7 @@ empty sidecar and the pipeline still succeeds.
 Configure via environment variables:
 
 - `OPENROUTER_API_KEY` — OpenRouter API key (required to actually run the agent).
-- `OPENROUTER_MODEL` — model id (default `anthropic/claude-3.5-sonnet`).
+- `OPENROUTER_MODEL` — model id (default `anthropic/claude-haiku-4.5`).
 
 ## Status
 Design approved; implementation pending (see spec + per-module READMEs).
