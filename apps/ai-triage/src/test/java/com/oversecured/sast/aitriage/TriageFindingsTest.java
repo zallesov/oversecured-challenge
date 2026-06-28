@@ -43,6 +43,19 @@ class TriageFindingsTest {
     }
 
     @Test
+    void toJsonEmbedsVerdictConfidenceAndFix() {
+        TriageResult result = new TriageResult("m", "t", "summary", List.of(
+                item("EXPLOIT_RULE", Verdict.EXPLOITABLE, TriageSeverity.CRITICAL)));
+
+        String json = TriageFindings.toJson(result);
+
+        assertThat(json).contains("\"verdict\" : \"exploitable\"");
+        assertThat(json).contains("\"confidence\" : 0.9");
+        assertThat(json).contains("\"fix\" : \"use an allowlist\"");
+        assertThat(json).contains("\"analyzer\" : \"ai-triage\"");
+    }
+
+    @Test
     void emptyWhenAllSafeOrNoItems() {
         TriageResult result = new TriageResult("m", "t", "s",
                 List.of(item("R", Verdict.SAFE, TriageSeverity.LOW)));

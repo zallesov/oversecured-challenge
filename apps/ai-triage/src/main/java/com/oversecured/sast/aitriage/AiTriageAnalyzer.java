@@ -1,7 +1,6 @@
 package com.oversecured.sast.aitriage;
 
 import com.oversecured.sast.common.FindingsDoc;
-import com.oversecured.sast.common.Json;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -72,7 +71,7 @@ public final class AiTriageAnalyzer {
 
         writeSoft(outJson, TriageJson.write(result));
         writeSoft(outMd, MarkdownRenderer.render(result));
-        writeSoft(outFindings, Json.writeString(findingsDoc));
+        writeSoft(outFindings, TriageFindings.toJson(result));
         return new Result(status, message, findingCount);
     }
 

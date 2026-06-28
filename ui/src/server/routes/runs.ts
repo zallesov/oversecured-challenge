@@ -183,6 +183,8 @@ function nodeJson(row: NodeRow) {
 }
 
 function findingJson(row: FindingRow) {
+  // AI triage findings carry extra fields (verdict/confidence/fix) inside raw_json.
+  const raw = (row.raw_json ?? {}) as Record<string, unknown>;
   return {
     id: row.id,
     runId: row.run_id,
@@ -198,6 +200,9 @@ function findingJson(row: FindingRow) {
     sourceLine: row.source_line,
     sinkFile: row.sink_file,
     sinkLine: row.sink_line,
+    verdict: typeof raw.verdict === "string" ? raw.verdict : null,
+    confidence: typeof raw.confidence === "number" ? raw.confidence : null,
+    fix: typeof raw.fix === "string" ? raw.fix : null,
     rawJson: row.raw_json,
     createdAt: toIso(row.created_at),
   };

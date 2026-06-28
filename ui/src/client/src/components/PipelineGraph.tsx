@@ -7,6 +7,7 @@ import {
   LoaderCircle,
   Timer
 } from 'lucide-react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
 import type { NodeState, RunNode } from '../api';
 
@@ -29,6 +30,19 @@ const stateIcon: Record<NodeState, ReactElement> = {
   RUNNING: <LoaderCircle size={14} aria-hidden="true" className="spin" />,
   COMPLETED: <CheckCircle2 size={14} aria-hidden="true" />,
   FAILED: <AlertCircle size={14} aria-hidden="true" />
+};
+
+type LinePair = {
+  from: string;
+  to: string;
+};
+
+type GraphLine = {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 };
 
 function formatDuration(durationMs?: number | null): string | null {
@@ -70,6 +84,35 @@ function buildStages(nodes: RunNode[]): RunNode[][] {
   }
 
   return stages;
+}
+
+function buildLinePairs(stages: RunNode[][]): LinePair[] {
+  const pairs: LinePair[] = [];
+
+  for (let index = 0; index < stages.length - 1; index += 1) {
+    const fromStage = stages[index];
+    const toStage = stages[index + 1];
+
+    if (fromStage.length === 1) {
+      for (const toNode of toStage) {
+        pairs.push({ from: fromStage[0].id, to: toNode.id });
+      }
+      continue;
+    }
+
+    if (toStage.length === 1) {
+      for (const fromNode of fromStage) {
+        pairs.push({ from: fromNode.id, to: toStage[0].id });
+      }
+      continue;
+    }
+
+    for (let nodeIndex = 0; nodeIndex < Math.min(fromStage.length, toStage.length); nodeIndex += 1) {
+      pairs.push({ from: fromStage[nodeIndex].id, to: toStage[nodeIndex].id });
+    }
+  }
+
+  return pairs;
 }
 
 function ruleLabel(value: unknown): string | null {
@@ -123,11 +166,13 @@ function metricSummary(node: RunNode): string | null {
 
 function NodeCard({
   node,
+  nodeRef,
   selected,
   selectable,
   onSelectNode
 }: {
   node: RunNode;
+  nodeRef: (element: HTMLElement | null) => void;
   selected: boolean;
   selectable: boolean;
   onSelectNode?: (nodeId: string) => void;
@@ -172,6 +217,7 @@ function NodeCard({
     return (
       <button
         type="button"
+        ref={nodeRef}
         className={`graph-node ${node.state.toLowerCase()} ${selected ? 'selected' : ''}`}
         onClick={() => onSelectNode?.(node.id)}
         aria-pressed={selected}
@@ -181,11 +227,75 @@ function NodeCard({
     );
   }
 
-  return <div className={`graph-node ${node.state.toLowerCase()}`}>{content}</div>;
+  return (
+    <div ref={nodeRef} className={`graph-node ${node.state.toLowerCase()}`}>
+      {content}
+    </div>
+  );
 }
 
 export function PipelineGraph({ nodes, selectedNodeId, onSelectNode }: PipelineGraphProps) {
-  const stages = buildStages(nodes);
+  const graphRef = useRef<HTMLDivElement | null>(null);
+  const nodeRefs = useRef(new Map<string, HTMLElement>());
+  const [lines, setLines] = useState<GraphLine[]>([]);
+  const stages = useMemo(() => buildStages(nodes), [nodes]);
+  const linePairs = useMemo(() => buildLinePairs(stages), [stages]);
+
+  const setNodeRef = useCallback((nodeId: string, element: HTMLElement | null) => {
+    if (element) {
+      nodeRefs.current.set(nodeId, element);
+    } else {
+      nodeRefs.current.delete(nodeId);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    const currentGraphElement = graphRef.current;
+    if (!currentGraphElement) {
+      setLines([]);
+      return undefined;
+    }
+    const graphElement = currentGraphElement;
+
+    function updateLines() {
+      const graphRect = graphElement.getBoundingClientRect();
+      const nextLines = linePairs.flatMap((pair) => {
+        const fromElement = nodeRefs.current.get(pair.from);
+        const toElement = nodeRefs.current.get(pair.to);
+        if (!fromElement || !toElement) {
+          return [];
+        }
+
+        const fromRect = fromElement.getBoundingClientRect();
+        const toRect = toElement.getBoundingClientRect();
+        return [
+          {
+            id: `${pair.from}:${pair.to}`,
+            x1: fromRect.right - graphRect.left,
+            y1: fromRect.top + fromRect.height / 2 - graphRect.top,
+            x2: toRect.left - graphRect.left,
+            y2: toRect.top + toRect.height / 2 - graphRect.top
+          }
+        ];
+      });
+
+      setLines(nextLines);
+    }
+
+    updateLines();
+
+    const resizeObserver = new ResizeObserver(updateLines);
+    resizeObserver.observe(graphElement);
+    for (const element of nodeRefs.current.values()) {
+      resizeObserver.observe(element);
+    }
+    window.addEventListener('resize', updateLines);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateLines);
+    };
+  }, [linePairs]);
 
   if (nodes.length === 0) {
     return (
@@ -197,14 +307,11 @@ export function PipelineGraph({ nodes, selectedNodeId, onSelectNode }: PipelineG
   }
 
   return (
-    <div className="pipeline-graph" aria-label="Scan pipeline graph">
-      <svg className="pipeline-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M18 50 C27 50 27 32 36 32" />
-        <path d="M18 50 C27 50 27 68 36 68" />
-        <path d="M46 32 C55 32 55 32 64 32" />
-        <path d="M46 68 C55 68 55 68 64 68" />
-        <path d="M74 32 C83 32 83 50 92 50" />
-        <path d="M74 68 C83 68 83 50 92 50" />
+    <div className="pipeline-graph" ref={graphRef} aria-label="Scan pipeline graph">
+      <svg className="pipeline-lines" aria-hidden="true">
+        {lines.map((line) => (
+          <line key={line.id} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+        ))}
       </svg>
 
       <div className="pipeline-stages" style={{ '--stage-count': stages.length } as CSSProperties}>
@@ -215,6 +322,7 @@ export function PipelineGraph({ nodes, selectedNodeId, onSelectNode }: PipelineG
               <NodeCard
                 key={node.id}
                 node={node}
+                nodeRef={(element) => setNodeRef(node.id, element)}
                 selected={selectedNodeId === node.id}
                 selectable={Boolean(onSelectNode)}
                 onSelectNode={onSelectNode}

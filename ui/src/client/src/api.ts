@@ -68,6 +68,9 @@ export type Finding = {
   sourceLine?: number | null;
   sinkFile?: string | null;
   sinkLine?: number | null;
+  verdict?: string | null;
+  confidence?: number | null;
+  fix?: string | null;
   rawJson?: unknown;
   createdAt?: string;
 };

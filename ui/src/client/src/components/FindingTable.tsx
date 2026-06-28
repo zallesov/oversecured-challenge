@@ -25,6 +25,19 @@ function location(file?: string | null, line?: number | null): string {
   return line ? `${file}:${line}` : file;
 }
 
+// Triage messages are stored as "[verdict, confidence X] rationale" — the prefix is shown in its
+// own columns, so strip it for the message cell.
+function cleanMessage(message: string): string {
+  return message.replace(/^\[[^\]]*\]\s*/, '');
+}
+
+function formatConfidence(confidence?: number | null): string {
+  if (confidence == null) {
+    return '—';
+  }
+  return `${Math.round(confidence * 100)}%`;
+}
+
 export function FindingTable({ findings, selectedNodeId }: FindingTableProps) {
   const [query, setQuery] = useState('');
   const [severity, setSeverity] = useState('ALL');
@@ -48,6 +61,7 @@ export function FindingTable({ findings, selectedNodeId }: FindingTableProps) {
           finding.ruleId,
           finding.vulnerabilityClass,
           finding.analyzer,
+          finding.fix,
           finding.sourceFile,
           finding.sinkFile
         ]
@@ -63,11 +77,15 @@ export function FindingTable({ findings, selectedNodeId }: FindingTableProps) {
       });
   }, [findings, query, selectedNodeId, severity]);
 
+  // Show the triage-specific columns (verdict/confidence/fix) when every visible finding is from
+  // the AI triage step; otherwise the generic rule/message layout.
+  const triageView = filtered.length > 0 && filtered.every((finding) => finding.analyzer === 'ai-triage');
+
   return (
     <section className="panel findings-panel" aria-labelledby="findings-heading">
       <div className="panel-heading findings-heading">
         <div>
-          <h2 id="findings-heading">Findings</h2>
+          <h2 id="findings-heading">{triageView ? 'AI Triage Findings' : 'Findings'}</h2>
           <p>
             {filtered.length} shown
             {selectedNodeId ? ` for ${selectedNodeId}` : ''}
@@ -99,6 +117,53 @@ export function FindingTable({ findings, selectedNodeId }: FindingTableProps) {
 
       {filtered.length === 0 ? (
         <div className="empty-state">No findings match the current view</div>
+      ) : triageView ? (
+        <div className="finding-table" role="table" aria-label="AI triage findings">
+          <div className="finding-row finding-header triage" role="row">
+            <span role="columnheader">Severity</span>
+            <span role="columnheader">Verdict</span>
+            <span role="columnheader">Confidence</span>
+            <span role="columnheader">Message</span>
+            <span role="columnheader">Fix</span>
+          </div>
+          {filtered.map((finding) => (
+            <details className="finding-row finding-item triage" key={finding.id}>
+              <summary>
+                <span className={`severity-pill ${String(finding.severity).toLowerCase()}`}>
+                  {finding.severity}
+                </span>
+                <span className={`verdict-pill ${String(finding.verdict ?? '').toLowerCase()}`}>
+                  {finding.verdict ?? '—'}
+                </span>
+                <span className="finding-confidence">{formatConfidence(finding.confidence)}</span>
+                <span className="finding-message">
+                  {finding.verdict ? cleanMessage(finding.message) : finding.message}
+                </span>
+                <span className="finding-fix">{finding.fix ?? '—'}</span>
+              </summary>
+              <div className="finding-details">
+                <dl>
+                  <div>
+                    <dt>Rule</dt>
+                    <dd>{finding.ruleId ?? 'Not specified'}</dd>
+                  </div>
+                  <div>
+                    <dt>Location</dt>
+                    <dd>{location(finding.sourceFile, finding.sourceLine)}</dd>
+                  </div>
+                  <div>
+                    <dt>CWE</dt>
+                    <dd>{finding.cwe ?? 'Not mapped'}</dd>
+                  </div>
+                  <div>
+                    <dt>OWASP Mobile</dt>
+                    <dd>{finding.owaspMobile ?? 'Not mapped'}</dd>
+                  </div>
+                </dl>
+              </div>
+            </details>
+          ))}
+        </div>
       ) : (
         <div className="finding-table" role="table" aria-label="Security findings">
           <div className="finding-row finding-header" role="row">
