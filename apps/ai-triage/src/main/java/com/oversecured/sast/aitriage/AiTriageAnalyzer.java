@@ -1,5 +1,7 @@
 package com.oversecured.sast.aitriage;
 
+import com.oversecured.sast.common.FindingsDoc;
+import com.oversecured.sast.common.Json;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,34 +31,49 @@ public final class AiTriageAnalyzer {
         ERROR
     }
 
-    public record Result(Status status, String message) {
+    public record Result(Status status, String message, int findingCount) {
     }
 
-    /** Always writes both sidecar files and returns an outcome; never throws. */
-    public Result run(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
+    /**
+     * Always writes the sidecar files ({@code outJson}, {@code outMd}) plus a standard
+     * {@link FindingsDoc} ({@code outFindings}) so actionable verdicts surface as findings.
+     * Returns an outcome; never throws.
+     */
+    public Result run(Path sarif, Path sourcesDir, Path outJson, Path outMd, Path outFindings) {
         TriageResult result;
-        Result outcome;
+        Status status;
+        String message;
         try {
             List<TriageFinding> findings = new SarifFindings().parse(sarif);
             TriageEngine engine = factory.create(sourcesDir);
             if (engine == null) {
                 result = empty("AI triage skipped: no engine available (set OPENROUTER_API_KEY).");
-                outcome = new Result(Status.SKIPPED, result.summary());
+                status = Status.SKIPPED;
             } else if (findings.isEmpty()) {
                 result = empty("AI triage skipped: no findings to analyze.");
-                outcome = new Result(Status.SKIPPED, result.summary());
+                status = Status.SKIPPED;
             } else {
                 result = engine.triage(findings);
-                outcome = new Result(Status.OK,
-                        "AI triage analyzed " + result.items().size() + " findings.");
+                status = Status.OK;
             }
         } catch (Exception e) {
             result = empty("AI triage failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-            outcome = new Result(Status.ERROR, result.summary());
+            status = Status.ERROR;
         }
+
+        FindingsDoc findingsDoc = TriageFindings.toFindingsDoc(result);
+        int findingCount = findingsDoc.findings().size();
+        if (status == Status.OK) {
+            message = "AI triage analyzed " + result.items().size() + " findings ("
+                    + findingCount + " actionable).";
+        } else {
+            message = result.summary();
+        }
+
         writeSoft(outJson, TriageJson.write(result));
         writeSoft(outMd, MarkdownRenderer.render(result));
-        return outcome;
+        writeSoft(outFindings, Json.writeString(findingsDoc));
+        return new Result(status, message, findingCount);
     }
 
     private TriageResult empty(String summary) {

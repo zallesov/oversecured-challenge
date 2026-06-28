@@ -194,7 +194,8 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         Path sourcesDir = paths.resolveArtifactKey(input.sourcesDirKey());
         Path outJson = paths.resolveArtifactKey(input.outJsonKey());
         Path outMd = paths.resolveArtifactKey(input.outMdKey());
-        AiTriageAnalyzer.Result outcome = apis.aiTriage(sarif, sourcesDir, outJson, outMd);
+        Path outFindings = paths.resolveArtifactKey(input.outFindingsKey());
+        AiTriageAnalyzer.Result outcome = apis.aiTriage(sarif, sourcesDir, outJson, outMd, outFindings);
 
         Map<String, Object> metrics = Map.of(
                 "aiTriageStatus", outcome.status().name(),
@@ -202,7 +203,8 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
                 "aiTriageMdWritten", Files.exists(outMd));
         List<ArtifactRef> artifacts = List.of(
                 new ArtifactRef("ai-triage-json", input.outJsonKey()),
-                new ArtifactRef("ai-triage-md", input.outMdKey()));
+                new ArtifactRef("ai-triage-md", input.outMdKey()),
+                new ArtifactRef("findings", input.outFindingsKey()));
 
         // The step is fail-soft for the *pipeline* (we never throw), but a real triage error is
         // surfaced as a FAILED node so it is visibly distinct from a clean run. The workflow runs
@@ -220,7 +222,14 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
                     0,
                     Map.of());
         }
-        return StepResult.completed("ai-triage", outcome.message(), metrics, artifacts, List.of(), 0, Map.of());
+        // Surface the actionable verdicts as findings so they show in the UI alongside the
+        // analyzer findings (ingested from this findings key when findingCount > 0).
+        List<String> findingsKeys = outcome.findingCount() > 0
+                ? List.of(input.outFindingsKey())
+                : List.of();
+        return StepResult.completed(
+                "ai-triage", outcome.message(), metrics, artifacts,
+                findingsKeys, outcome.findingCount(), Map.of());
     }
 
     /** One taint rule to run in a batch: its name, resolved rule file, and resolved output file. */
@@ -240,7 +249,7 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
 
         void report(List<Path> findingsFiles, Path html, Path sarif);
 
-        AiTriageAnalyzer.Result aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd);
+        AiTriageAnalyzer.Result aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd, Path outFindings);
     }
 
     private static final class ProductionStepApis implements StepApis {
@@ -302,8 +311,9 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         }
 
         @Override
-        public AiTriageAnalyzer.Result aiTriage(Path sarif, Path sourcesDir, Path outJson, Path outMd) {
-            return new AiTriageAnalyzer().run(sarif, sourcesDir, outJson, outMd);
+        public AiTriageAnalyzer.Result aiTriage(
+                Path sarif, Path sourcesDir, Path outJson, Path outMd, Path outFindings) {
+            return new AiTriageAnalyzer().run(sarif, sourcesDir, outJson, outMd, outFindings);
         }
     }
 

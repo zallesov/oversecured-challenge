@@ -117,7 +117,8 @@ public final class AnalyzeApkWorkflowImpl implements AnalyzeApkWorkflow {
                 plan.report().sarifKey(),
                 plan.keys().sourcesDirKey(),
                 plan.report().aiTriageJsonKey(),
-                plan.report().aiTriageMdKey())));
+                plan.report().aiTriageMdKey(),
+                plan.report().aiTriageFindingsKey())));
 
         return new AnalysisResult(
                 plan.report().htmlKey(),

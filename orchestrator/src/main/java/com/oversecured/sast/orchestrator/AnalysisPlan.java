@@ -71,7 +71,8 @@ public record AnalysisPlan(
                         keys.rootKey() + "/report.html",
                         keys.rootKey() + "/report.sarif",
                         keys.rootKey() + "/ai-triage.json",
-                        keys.rootKey() + "/ai-triage.md"));
+                        keys.rootKey() + "/ai-triage.md",
+                        keys.rootKey() + "/findings-ai-triage.json"));
     }
 
     private static void requireRuleName(String name) {
@@ -99,6 +100,11 @@ public record AnalysisPlan(
     public record ManifestMisconfigAnalysis(String name, String rulePath, String findingsKey) {
     }
 
-    public record ReportConfig(String htmlKey, String sarifKey, String aiTriageJsonKey, String aiTriageMdKey) {
+    public record ReportConfig(
+            String htmlKey,
+            String sarifKey,
+            String aiTriageJsonKey,
+            String aiTriageMdKey,
+            String aiTriageFindingsKey) {
     }
 }

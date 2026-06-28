@@ -149,16 +149,22 @@ class PipelineActivitiesImplTest {
                 "runs/r1/report.sarif",
                 "runs/r1/sources",
                 "runs/r1/ai-triage.json",
-                "runs/r1/ai-triage.md"));
+                "runs/r1/ai-triage.md",
+                "runs/r1/findings-ai-triage.json"));
 
         assertThat(result.nodeId()).isEqualTo("ai-triage");
         assertThat(result.artifacts()).containsExactly(
                 new ArtifactRef("ai-triage-json", "runs/r1/ai-triage.json"),
-                new ArtifactRef("ai-triage-md", "runs/r1/ai-triage.md"));
+                new ArtifactRef("ai-triage-md", "runs/r1/ai-triage.md"),
+                new ArtifactRef("findings", "runs/r1/findings-ai-triage.json"));
+        // Actionable verdicts are surfaced as findings for UI ingestion.
+        assertThat(result.findingsKeys()).containsExactly("runs/r1/findings-ai-triage.json");
+        assertThat(result.findingCount()).isEqualTo(1);
         assertThat(apis.calls).containsExactly(
                 "aitriage:" + root.resolve("runs/r1/report.sarif").toAbsolutePath().normalize()
                         + "->" + root.resolve("runs/r1/ai-triage.json").toAbsolutePath().normalize()
-                        + ":" + root.resolve("runs/r1/ai-triage.md").toAbsolutePath().normalize());
+                        + ":" + root.resolve("runs/r1/ai-triage.md").toAbsolutePath().normalize()
+                        + ":" + root.resolve("runs/r1/findings-ai-triage.json").toAbsolutePath().normalize());
     }
 
     @Test
@@ -166,20 +172,23 @@ class PipelineActivitiesImplTest {
         RecordingStepApis apis = new RecordingStepApis();
         apis.aiTriageResult = new com.oversecured.sast.aitriage.AiTriageAnalyzer.Result(
                 com.oversecured.sast.aitriage.AiTriageAnalyzer.Status.ERROR,
-                "AI triage failed: RuntimeException: API down");
+                "AI triage failed: RuntimeException: API down", 0);
         PipelineActivitiesImpl activities = PipelineActivitiesImpl.forTesting(root, apis);
 
         StepResult result = activities.aiTriage(new com.oversecured.sast.orchestrator.activities.AiTriageActivityInput(
-                "runs/r1/report.sarif", "runs/r1/sources", "runs/r1/ai-triage.json", "runs/r1/ai-triage.md"));
+                "runs/r1/report.sarif", "runs/r1/sources", "runs/r1/ai-triage.json", "runs/r1/ai-triage.md",
+                "runs/r1/findings-ai-triage.json"));
 
         assertThat(result.state()).isEqualTo(com.oversecured.sast.orchestrator.status.StepState.FAILED);
         assertThat(result.error()).isNotNull();
         assertThat(result.error().kind()).isEqualTo("AI_TRIAGE");
         assertThat(result.message()).contains("AI triage failed");
+        assertThat(result.findingsKeys()).isEmpty();
         // The sidecar artifacts are still surfaced on a failed node.
         assertThat(result.artifacts()).containsExactly(
                 new ArtifactRef("ai-triage-json", "runs/r1/ai-triage.json"),
-                new ArtifactRef("ai-triage-md", "runs/r1/ai-triage.md"));
+                new ArtifactRef("ai-triage-md", "runs/r1/ai-triage.md"),
+                new ArtifactRef("findings", "runs/r1/findings-ai-triage.json"));
     }
 
     @Test
@@ -277,16 +286,18 @@ class PipelineActivitiesImplTest {
 
         private com.oversecured.sast.aitriage.AiTriageAnalyzer.Result aiTriageResult =
                 new com.oversecured.sast.aitriage.AiTriageAnalyzer.Result(
-                        com.oversecured.sast.aitriage.AiTriageAnalyzer.Status.OK, "AI triage analyzed 1 findings.");
+                        com.oversecured.sast.aitriage.AiTriageAnalyzer.Status.OK,
+                        "AI triage analyzed 1 findings (1 actionable).", 1);
 
         @Override
         public com.oversecured.sast.aitriage.AiTriageAnalyzer.Result aiTriage(
-                Path sarif, Path sourcesDir, Path outJson, Path outMd) {
-            calls.add("aitriage:" + sarif + "->" + outJson + ":" + outMd);
+                Path sarif, Path sourcesDir, Path outJson, Path outMd, Path outFindings) {
+            calls.add("aitriage:" + sarif + "->" + outJson + ":" + outMd + ":" + outFindings);
             try {
                 Files.createDirectories(outJson.getParent());
                 Files.writeString(outJson, "{\"items\":[]}");
                 Files.writeString(outMd, "# AI Triage\n");
+                Files.writeString(outFindings, "{\"analyzer\":\"ai-triage\",\"findings\":[]}");
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

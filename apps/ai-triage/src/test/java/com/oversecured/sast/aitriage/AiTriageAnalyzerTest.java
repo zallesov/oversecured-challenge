@@ -35,13 +35,21 @@ class AiTriageAnalyzerTest {
 
         Path outJson = dir.resolve("ai-triage.json");
         Path outMd = dir.resolve("ai-triage.md");
-        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd);
+        Path outFindings = dir.resolve("findings-ai-triage.json");
+        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd, outFindings);
 
         assertThat(outcome.status()).isEqualTo(AiTriageAnalyzer.Status.OK);
+        assertThat(outcome.findingCount()).isEqualTo(1);
         TriageResult written = TriageJson.read(Files.readString(outJson));
         assertThat(written.items()).hasSize(1);
         assertThat(written.items().get(0).verdict()).isEqualTo(Verdict.EXPLOITABLE);
         assertThat(Files.readString(outMd)).contains("ANDROID_WEBVIEW_INTENT_LOADURL");
+        // The actionable verdict is also written as a standard findings doc.
+        var findingsDoc = com.oversecured.sast.common.Json.read(
+                Files.readAllBytes(outFindings), com.oversecured.sast.common.FindingsDoc.class);
+        assertThat(findingsDoc.analyzer()).isEqualTo("ai-triage");
+        assertThat(findingsDoc.findings()).hasSize(1);
+        assertThat(findingsDoc.findings().get(0).ruleId()).isEqualTo("ANDROID_WEBVIEW_INTENT_LOADURL");
     }
 
     @Test
@@ -51,9 +59,11 @@ class AiTriageAnalyzerTest {
 
         Path outJson = dir.resolve("ai-triage.json");
         Path outMd = dir.resolve("ai-triage.md");
-        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd);
+        Path outFindings = dir.resolve("findings-ai-triage.json");
+        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd, outFindings);
 
         assertThat(outcome.status()).isEqualTo(AiTriageAnalyzer.Status.SKIPPED);
+        assertThat(outcome.findingCount()).isZero();
         TriageResult written = TriageJson.read(Files.readString(outJson));
         assertThat(written.items()).isEmpty();
         assertThat(written.summary()).contains("skipped");
@@ -75,7 +85,8 @@ class AiTriageAnalyzerTest {
 
         Path outJson = dir.resolve("ai-triage.json");
         Path outMd = dir.resolve("ai-triage.md");
-        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd); // must not throw
+        Path outFindings = dir.resolve("findings-ai-triage.json");
+        AiTriageAnalyzer.Result outcome = analyzer.run(sarif, dir, outJson, outMd, outFindings); // must not throw
 
         assertThat(outcome.status()).isEqualTo(AiTriageAnalyzer.Status.ERROR);
         assertThat(outcome.message()).contains("AI triage failed");

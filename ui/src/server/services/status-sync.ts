@@ -205,8 +205,9 @@ async function ingestFindingsForNode(
   runId: string,
   node: WorkflowNodeStatus,
 ): Promise<void> {
+  // Ingest findings from any node that exposes a findings key (taint/misconfig analyzers and the
+  // ai-triage step, which lives in the "report" lane). Nodes without findings keys are skipped.
   if (
-    node.kind !== "analyzer" ||
     node.state !== "COMPLETED" ||
     !Array.isArray(node.findingsKeys) ||
     node.findingsKeys.length === 0 ||

@@ -37,6 +37,7 @@ export type AnalysisPlan = {
     sarifKey: string;
     aiTriageJsonKey: string;
     aiTriageMdKey: string;
+    aiTriageFindingsKey: string;
   };
 };
 
@@ -113,6 +114,7 @@ export function buildAnalysisPlan(runId: string): AnalysisPlan {
       sarifKey: `${rootKey}/report.sarif`,
       aiTriageJsonKey: `${rootKey}/ai-triage.json`,
       aiTriageMdKey: `${rootKey}/ai-triage.md`,
+      aiTriageFindingsKey: `${rootKey}/findings-ai-triage.json`,
     },
   };
 }
