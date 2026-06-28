@@ -1,0 +1,28 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": { "driver": { "name": "android-taint-sast", "rules": [
+        { "id": "ANDROID_WEBVIEW_INTENT_LOADURL", "name": "webview-open-redirect",
+          "properties": { "cwe": "CWE-601", "owaspMobile": "M1" } }
+      ] } },
+      "results": [
+        {
+          "ruleId": "ANDROID_WEBVIEW_INTENT_LOADURL",
+          "level": "error",
+          "message": { "text": "Untrusted deeplink data flows into WebView.loadUrl" },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "WebViewActivity.java" },
+              "region": { "startLine": 22 } } }
+          ],
+          "codeFlows": [ { "threadFlows": [ { "locations": [
+            { "location": { "physicalLocation": { "artifactLocation": { "uri": "DeeplinkActivity.java" },
+              "region": { "startLine": 47 } }, "message": { "text": "source: Uri.getQueryParameter(\"url\")" } } },
+            { "location": { "physicalLocation": { "artifactLocation": { "uri": "WebViewActivity.java" },
+              "region": { "startLine": 22 } }, "message": { "text": "sink: WebView.loadUrl(url)" } } }
+          ] } ] } ]
+        }
+      ]
+    }
+  ]
+}

@@ -91,6 +91,23 @@ public final class IntraProceduralAnalyzer {
         return sawTaintedReturn;
     }
 
+    /**
+     * Summary-computation probe: returns whether tainting {@code paramIndex} alone makes any sink
+     * fire inside {@code method}'s body, under the currently-known summaries. Findings produced by
+     * the probe are discarded (only the boolean is reported), so the probe never surfaces results.
+     */
+    public boolean reachesSinkForParam(MethodDeclaration method, int paramIndex) {
+        this.findings = new ArrayList<>();
+        this.currentComponent = null;
+        this.sawTaintedReturn = false;
+        String paramName = method.getParameter(paramIndex).getNameAsString();
+        TaintState seed = TaintState.empty().taint(AccessPath.of(paramName), new FlowTrace());
+        method.getBody().ifPresent(body -> exec(body, seed));
+        boolean reached = !this.findings.isEmpty();
+        this.findings = new ArrayList<>();
+        return reached;
+    }
+
     public List<CandidateFinding> analyzeMethod(MethodDeclaration method) {
         this.findings = new ArrayList<>();
         this.currentComponent = method.findAncestor(TypeDeclaration.class)
@@ -250,6 +267,27 @@ public final class IntraProceduralAnalyzer {
             }
             return t.isPresent() ? state.taint(path, t.get()) : state.kill(path);
         }
+        // Carrier call (e.g. Intent.putExtra): a tainted argument taints the receiver object, so a
+        // later sink on that variable (sendBroadcast(i)/startActivity(i)) fires. Handled here at the
+        // statement level because the call's result is discarded — tainting the return would be lost.
+        if (expr instanceof MethodCallExpr carrier && carrier.getScope().isPresent()) {
+            Optional<String> sig = index.resolveSignature(carrier);
+            if (sig.isPresent() && matcher.isCarrier(sig.get())) {
+                AccessPath recv = targetPath(carrier.getScope().get());
+                eval(carrier.getScope().get(), state); // scope side effects
+                Optional<FlowTrace> taintedArg = Optional.empty();
+                for (Expression arg : carrier.getArguments()) {
+                    Optional<FlowTrace> t = eval(arg, state); // arg side effects (nested sinks)
+                    if (taintedArg.isEmpty() && t.isPresent()) {
+                        taintedArg = t;
+                    }
+                }
+                if (recv != null && taintedArg.isPresent()) {
+                    return state.taint(recv, taintedArg.get().addStep(step(carrier, "carrier: " + carrier)));
+                }
+                return state;
+            }
+        }
         eval(expr, state); // standalone call etc. — side effects (sinks)
         return state;
     }
@@ -326,7 +364,9 @@ public final class IntraProceduralAnalyzer {
                 params.append(decl.getParam(i).getType().describe());
             }
             return "<" + decl.declaringType().getQualifiedName() + ": void <init>(" + params + ")>";
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | StackOverflowError e) {
+            // Fail-soft: unresolved constructor (or symbol-solver recursion on recursive generic
+            // bounds, androidx + android.jar) yields no signature instead of aborting the run.
             return null;
         }
     }
@@ -369,7 +409,29 @@ public final class IntraProceduralAnalyzer {
                 return Optional.of(in.get().addStep(step(mce, "propagator: " + mce)));
             }
         }
+        emitCrossMethodSink(mce, resolved, argTraces);
         return applySummary(mce, resolved, scopeTrace, argTraces);
+    }
+
+    /**
+     * Inter-procedural emission: if the resolved call is an app method whose summary marks a
+     * parameter as sink-reaching, and the corresponding argument is tainted, the tainted data
+     * reaches a sink inside the callee. Emit once per call site even if several args qualify.
+     */
+    private void emitCrossMethodSink(MethodCallExpr mce, String resolvedSignature,
+                                     List<Optional<FlowTrace>> argTraces) {
+        MethodSummary summary = summaryBySignature.get(resolvedSignature);
+        if (summary == null) {
+            return;
+        }
+        for (int i : summary.sinkReachingParams()) {
+            if (i >= 0 && i < argTraces.size() && argTraces.get(i).isPresent()) {
+                FlowTrace into = argTraces.get(i).get()
+                        .addStep(step(mce, "flows into " + mce.getNameAsString() + " param " + i + " reaching sink"));
+                emitFinding(into, mce);
+                break;
+            }
+        }
     }
 
     /** Apply a method summary: if a parameter that taints the return is tainted, taint the result. */

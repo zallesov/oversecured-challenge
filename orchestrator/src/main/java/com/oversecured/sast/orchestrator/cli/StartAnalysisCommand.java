@@ -3,7 +3,10 @@ package com.oversecured.sast.orchestrator.cli;
 import com.oversecured.sast.orchestrator.AnalysisPlan;
 import com.oversecured.sast.orchestrator.AnalysisResult;
 import com.oversecured.sast.orchestrator.AnalyzeApkRequest;
+import com.oversecured.sast.orchestrator.RuleCatalog;
 import com.oversecured.sast.orchestrator.TaskQueues;
+import java.nio.file.Path;
+import java.util.List;
 import com.oversecured.sast.orchestrator.workflow.AnalyzeApkWorkflow;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
@@ -24,6 +27,15 @@ public final class StartAnalysisCommand implements Callable<Integer> {
     @CommandLine.Option(names = "--temporal", defaultValue = "127.0.0.1:7233")
     private String temporalTarget;
 
+    @CommandLine.Option(names = "--rules", defaultValue = RuleCatalog.ALL,
+            description = "Comma-separated taint rule names (file base names), or 'all' (default) "
+                    + "to run every rule in --rules-dir.")
+    private String rules;
+
+    @CommandLine.Option(names = "--rules-dir", defaultValue = "rules",
+            description = "Directory listed to expand --rules=all. Default: rules")
+    private String rulesDir;
+
     private final WorkflowStarter starter;
 
     public StartAnalysisCommand() {
@@ -36,11 +48,15 @@ public final class StartAnalysisCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        AnalysisPlan plan = AnalysisPlan.defaultPlan(runId);
+        List<String> ruleNames = new RuleCatalog(Path.of(rulesDir)).resolve(rules);
+        System.out.println("rules=" + ruleNames);
+        AnalysisPlan plan = AnalysisPlan.forRules(runId, ruleNames);
         String workflowId = "android-sast-" + runId;
         AnalysisResult result = starter.start(temporalTarget, workflowId, new AnalyzeApkRequest(apk, plan));
         System.out.println("html=" + result.htmlReportKey());
         System.out.println("sarif=" + result.sarifReportKey());
+        System.out.println("aiTriageJson=" + result.aiTriageJsonKey());
+        System.out.println("aiTriageMd=" + result.aiTriageMdKey());
         return 0;
     }
 

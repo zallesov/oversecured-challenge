@@ -1,0 +1,26 @@
+version: 1
+rules:
+  - id: ANDROID_LOGIN_URL_INJECTION
+    vulnerability_class: untrusted-endpoint-override
+    severity: error
+    cwe: CWE-601
+    owasp_mobile: M1
+    message: "Deeplink query parameter overrides the persisted login URL (credential exfiltration endpoint)"
+
+    manifest_conditions:
+      reachable_from_exported: true     # DeeplinkActivity is exported (VIEW, scheme oversecured://ovaa)
+
+    # DeeplinkActivity.processDeeplink, "/login" branch:
+    #   String url = uri.getQueryParameter("url");   // :36
+    #   loginUtils.setLoginUrl(url);                  // :38
+    sources:
+      - signature: "android.net.Uri: java.lang.String getQueryParameter(java.lang.String)"
+      - signature: "android.content.Intent: android.net.Uri getData()"
+
+    sinks:
+      - signature: "oversecured.ovaa.utils.LoginUtils: void setLoginUrl(java.lang.String)"
+        tainted_args: [0]
+
+    sanitizers: []                      # "/login" branch has no host/scheme check on the url value
+
+    propagators: []

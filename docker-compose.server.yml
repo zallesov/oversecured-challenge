@@ -1,0 +1,115 @@
+# Server stack for the Android SAST system. Self-contained; coexists with other stacks on
+# the host. All published host ports are offset into 18xxx and the compose project is isolated
+# by name (`-p oversecured`). Temporal gRPC and both Postgres DBs are internal only.
+#
+#   docker compose -f docker-compose.server.yml -p oversecured --env-file .env.server up -d
+#
+# Images are pre-built and `docker load`ed on the remote (no registry); the `build:` blocks are
+# only used when building locally with `--build`. See docs/server-stack.md.
+
+services:
+  temporal-postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    volumes:
+      - temporal-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.29.6
+    restart: unless-stopped
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: temporal-postgres
+    # gRPC 7233 internal only — not published.
+
+  temporal-ui:
+    image: temporalio/ui:2.51.0
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: ${TEMPORAL_UI_CORS_ORIGINS:-http://localhost:18030}
+    ports:
+      - "${TEMPORAL_UI_PORT:-18080}:8080"
+
+  ui-postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${UI_DB_USER:-ui}
+      POSTGRES_PASSWORD: ${UI_DB_PASSWORD:-ui}
+      POSTGRES_DB: ${UI_DB_NAME:-ui}
+    volumes:
+      - ui-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${UI_DB_USER:-ui}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ui:
+    image: oversecured-ui:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+      ui-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${UI_DB_USER:-ui}:${UI_DB_PASSWORD:-ui}@ui-postgres:5432/${UI_DB_NAME:-ui}
+      TEMPORAL_ADDRESS: temporal:7233
+      ARTIFACT_ROOT: /workspace/artifacts
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.server}
+      NODE_ENV: production
+      PORT: "3000"
+    ports:
+      - "${UI_PORT:-18030}:3000"
+    volumes:
+      - artifacts:/workspace/artifacts
+
+  worker:
+    image: oversecured-worker:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+      args:
+        ANDROID_API: ${ANDROID_API:-34}
+    restart: on-failure
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      ARTIFACT_ROOT: /workspace/artifacts
+      # Baked android.jar (see orchestrator/Dockerfile). Explicit override beats ANDROID_HOME.
+      SAST_ANDROID_JAR: /opt/android/android-${ANDROID_API:-34}/android.jar
+      # AI triage step (always-on, fail-soft). Without a key it writes an empty sidecar.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-anthropic/claude-haiku-4.5}
+    volumes:
+      - artifacts:/workspace/artifacts
+      - ./rules:/workspace/artifacts/rules:ro
+      - ./test-subjects:/workspace/test-subjects:ro
+
+volumes:
+  temporal-postgres:
+  ui-postgres:
+  artifacts:

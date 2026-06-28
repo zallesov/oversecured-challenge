@@ -1,0 +1,24 @@
+version: 1
+rules:
+  - id: ANDROID_FILE_THEFT_ACTION_PICK
+    vulnerability_class: file-theft
+    severity: error
+    cwe: CWE-200
+    owasp_mobile: M2
+    message: "Attacker-supplied content Uri from an activity result is copied into app cache (file theft)"
+
+    manifest_conditions:
+      reachable_from_exported: true     # MainActivity is exported (action ACTIVITY_MAIN)
+
+    # MainActivity.onActivityResult:
+    #   FileUtils.copyToCache(this, data.getData());   // :68
+    sources:
+      - signature: "android.content.Intent: android.net.Uri getData()"
+
+    sinks:
+      - signature: "oversecured.ovaa.utils.FileUtils: java.io.File copyToCache(android.content.Context,android.net.Uri)"
+        tainted_args: [1]               # the Uri argument
+
+    sanitizers: []
+
+    propagators: []                     # Uri flows straight from getData() into copyToCache

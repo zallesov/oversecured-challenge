@@ -1,5 +1,6 @@
 package com.oversecured.sast.parser.cli;
 
+import com.oversecured.sast.common.AndroidPlatform;
 import com.oversecured.sast.common.FailureKind;
 import com.oversecured.sast.parser.AstIndex;
 import com.oversecured.sast.parser.ParserException;
@@ -14,6 +15,8 @@ import picocli.CommandLine.Spec;
 import picocli.CommandLine.Model.CommandSpec;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 
 @Command(
@@ -33,14 +36,29 @@ public final class ParseCommand implements Callable<Integer> {
     @Option(names = "--out", required = true, description = "Output ast-index/ directory.")
     Path out;
 
+    @Option(names = "--classpath", arity = "0..*", split = ":",
+        description = "Resolution jars (e.g. the Android SDK android.jar). Lets the symbol solver "
+            + "resolve library calls referenced but not defined in --src. Repeat or ':'-separate.")
+    List<Path> classpath = new ArrayList<>();
+
+    @Option(names = "--android-jar", negatable = true,
+        description = "Auto-add the Android SDK android.jar to the classpath when none is given "
+            + "(default: true). Disable with --no-android-jar.")
+    boolean autoAndroidJar = true;
+
     @Spec
     CommandSpec spec;
 
     @Override
     public Integer call() {
-        log.info("{} ▶️ parse --src {} --out {}", FN, src, out); // ▶️
+        List<Path> resolvedClasspath = new ArrayList<>(classpath);
+        if (resolvedClasspath.isEmpty() && autoAndroidJar) {
+            // Default to the SDK android.jar so framework signatures resolve on decompiled APKs.
+            resolvedClasspath.addAll(AndroidPlatform.resolve());
+        }
+        log.info("{} ▶️ parse --src {} --out {} (classpath: {})", FN, src, out, resolvedClasspath); // ▶️
         try {
-            AstIndex index = AstIndex.build(src);
+            AstIndex index = AstIndex.build(src, resolvedClasspath);
             index.save(out);
             log.info("{} ✅ parsed {} compilation unit(s) -> {}", FN, index.units().size(), out); // ✅
             // One human summary line on stdout (logging conventions §2.1); not a step contract.

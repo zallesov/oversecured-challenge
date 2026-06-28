@@ -21,16 +21,19 @@ public final class RuleMatcher {
     private final Map<String, SinkSpec> sinks;
     private final Map<String, SanitizerSpec> sanitizers;
     private final Set<String> propagators;
+    private final Set<String> carriers;
 
     private RuleMatcher(
             Map<String, SourceSpec> sources,
             Map<String, SinkSpec> sinks,
             Map<String, SanitizerSpec> sanitizers,
-            Set<String> propagators) {
+            Set<String> propagators,
+            Set<String> carriers) {
         this.sources = sources;
         this.sinks = sinks;
         this.sanitizers = sanitizers;
         this.propagators = propagators;
+        this.carriers = carriers;
     }
 
     public static RuleMatcher forRule(Rule rule) {
@@ -50,7 +53,11 @@ public final class RuleMatcher {
         for (String p : rule.getPropagators()) {
             propagators.add(RuleSignatures.canonical(p));
         }
-        return new RuleMatcher(sources, sinks, sanitizers, propagators);
+        Set<String> carriers = new java.util.HashSet<>();
+        for (String c : rule.getCarriers()) {
+            carriers.add(RuleSignatures.canonical(c));
+        }
+        return new RuleMatcher(sources, sinks, sanitizers, propagators, carriers);
     }
 
     public Optional<SourceSpec> sourceFor(String resolvedSignature) {
@@ -67,5 +74,10 @@ public final class RuleMatcher {
 
     public boolean isPropagator(String resolvedSignature) {
         return propagators.contains(resolvedSignature);
+    }
+
+    /** A carrier taints its receiver object when a tainted argument is passed (e.g. Intent.putExtra). */
+    public boolean isCarrier(String resolvedSignature) {
+        return carriers.contains(resolvedSignature);
     }
 }

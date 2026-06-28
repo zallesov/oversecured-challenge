@@ -10,6 +10,7 @@ dependencies {
     implementation project(':apps:taint')
     implementation project(':apps:manifest-misconfig')
     implementation project(':apps:reporter')
+    implementation project(':apps:ai-triage')
 
     implementation "io.temporal:temporal-sdk:${rootProject.ext.temporalVersion}"
     implementation "info.picocli:picocli:${rootProject.ext.picocliVersion}"
@@ -26,4 +27,7 @@ dependencies {
 application {
     mainClass = 'com.oversecured.sast.orchestrator.cli.WorkerMain'
     applicationName = 'orchestrator'
+    // The taint activity re-parses the whole decompiled tree with an android.jar solver; give the
+    // worker headroom. Overridable at launch via ORCHESTRATOR_OPTS / JAVA_OPTS.
+    applicationDefaultJvmArgs = ['-Xmx4g']
 }

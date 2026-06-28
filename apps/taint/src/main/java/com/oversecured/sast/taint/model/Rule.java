@@ -18,6 +18,7 @@ public final class Rule {
     private final List<SinkSpec> sinks;
     private final List<SanitizerSpec> sanitizers;
     private final List<String> propagators;
+    private final List<String> carriers;
 
     @JsonCreator
     public Rule(
@@ -31,7 +32,8 @@ public final class Rule {
             @JsonProperty("sources") List<SourceSpec> sources,
             @JsonProperty("sinks") List<SinkSpec> sinks,
             @JsonProperty("sanitizers") List<SanitizerSpec> sanitizers,
-            @JsonProperty("propagators") List<String> propagators) {
+            @JsonProperty("propagators") List<String> propagators,
+            @JsonProperty("carriers") List<String> carriers) {
         this.id = id;
         this.vulnerabilityClass = vulnerabilityClass;
         this.severity = severity;
@@ -43,6 +45,16 @@ public final class Rule {
         this.sinks = sinks == null ? List.of() : List.copyOf(sinks);
         this.sanitizers = sanitizers == null ? List.of() : List.copyOf(sanitizers);
         this.propagators = propagators == null ? List.of() : List.copyOf(propagators);
+        this.carriers = carriers == null ? List.of() : List.copyOf(carriers);
+    }
+
+    /** Convenience overload for callers that predate carriers (no carrier methods). */
+    public Rule(
+            String id, String vulnerabilityClass, Severity severity, String cwe, String owaspMobile,
+            String message, ManifestConditions manifestConditions, List<SourceSpec> sources,
+            List<SinkSpec> sinks, List<SanitizerSpec> sanitizers, List<String> propagators) {
+        this(id, vulnerabilityClass, severity, cwe, owaspMobile, message, manifestConditions,
+                sources, sinks, sanitizers, propagators, List.of());
     }
 
     public String getId() {
@@ -87,5 +99,10 @@ public final class Rule {
 
     public List<String> getPropagators() {
         return propagators;
+    }
+
+    /** Methods that taint their receiver object when an argument is tainted (e.g. Intent.putExtra). */
+    public List<String> getCarriers() {
+        return carriers;
     }
 }

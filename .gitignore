@@ -2,13 +2,24 @@
 .gradle/
 build/
 
-# IDE
+# Eclipse / IDE build output
+bin/
 .idea/
 *.iml
 .vscode/
+.classpath
+.project
+.settings/
 
 # OS
 .DS_Store
 
 # Local runtime data
 minio-data/
+artifacts/
+
+# UI
+ui/node_modules/
+ui/dist/
+ui/.env
+.env.server

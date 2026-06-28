@@ -1,0 +1,36 @@
+version: 1
+rules:
+  - id: ANDROID_INTENT_REDIRECTION
+    vulnerability_class: intent-redirection
+    severity: error
+    cwe: CWE-927
+    owasp_mobile: M1
+    message: "Untrusted nested Intent from getParcelableExtra is passed straight to startActivity (Intent redirection)"
+
+    manifest_conditions:
+      reachable_from_exported: true     # LoginActivity is exported (action LOGIN)
+
+    # LoginActivity.onLoginFinished:
+    #   Intent redirectIntent = getIntent().getParcelableExtra("redirect_intent");  // :77
+    #   startActivity(redirectIntent);                                              // :79
+    sources:
+      # return type depends on android.jar API level: pre-33 is concrete Parcelable,
+      # API 33+ is the generic <T extends Parcelable> T. All variants listed so the
+      # exact-signature matcher fires regardless of which platform jar resolved it.
+      - signature: "android.content.Intent: android.os.Parcelable getParcelableExtra(java.lang.String)"
+      - signature: "android.content.Intent: T getParcelableExtra(java.lang.String)"
+      - signature: "android.content.Intent: java.lang.Object getParcelableExtra(java.lang.String)"
+
+    sinks:
+      # startActivity(Intent) is overridden on android.app.Activity; Context/ContextWrapper
+      # variants kept for components that resolve to the base declarations.
+      - signature: "android.app.Activity: void startActivity(android.content.Intent)"
+        tainted_args: [0]
+      - signature: "android.content.Context: void startActivity(android.content.Intent)"
+        tainted_args: [0]
+      - signature: "android.content.ContextWrapper: void startActivity(android.content.Intent)"
+        tainted_args: [0]
+
+    sanitizers: []                      # null-check (redirectIntent != null) is not a sanitizer
+
+    propagators: []                     # clean source -> sink, no transform

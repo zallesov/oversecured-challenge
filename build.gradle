@@ -5,6 +5,7 @@ ext {
     slf4jVersion = '2.0.13'
     picocliVersion = '4.7.6'
     temporalVersion = '1.36.0'
+    langchain4jVersion = '1.1.0'
 }
 
 subprojects {

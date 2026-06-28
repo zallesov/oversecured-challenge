@@ -1,5 +1,6 @@
 package com.oversecured.sast.orchestrator.activities;
 
+import com.oversecured.sast.orchestrator.status.StepResult;
 import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
 
@@ -7,20 +8,24 @@ import io.temporal.activity.ActivityMethod;
 public interface PipelineActivities {
 
     @ActivityMethod
-    String decompile(DecompileActivityInput input);
+    StepResult decompile(DecompileActivityInput input);
 
     @ActivityMethod
-    String parseSources(ParseActivityInput input);
+    StepResult parseSources(ParseActivityInput input);
 
     @ActivityMethod
-    String extractManifestFacts(ManifestFactsActivityInput input);
+    StepResult extractManifestFacts(ManifestFactsActivityInput input);
+
+    /** Run all taint rules from a single AST-index load. */
+    @ActivityMethod
+    StepResult runTaintBatch(TaintBatchActivityInput input);
 
     @ActivityMethod
-    String runTaint(TaintActivityInput input);
+    StepResult runManifestMisconfig(MisconfigActivityInput input);
 
     @ActivityMethod
-    String runManifestMisconfig(MisconfigActivityInput input);
+    StepResult report(ReportActivityInput input);
 
     @ActivityMethod
-    ReportArtifacts report(ReportActivityInput input);
+    StepResult aiTriage(AiTriageActivityInput input);
 }

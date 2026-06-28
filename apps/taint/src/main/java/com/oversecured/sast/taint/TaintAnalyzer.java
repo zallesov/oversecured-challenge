@@ -40,15 +40,11 @@ public final class TaintAnalyzer {
 
     /** Load artifacts from disk and analyze every rule in the rule file. */
     public FindingsDoc analyze(Path astIndexDir, Path factsJson, Path ruleYaml) {
-        AstIndex index = AstIndex.load(astIndexDir);
-        ManifestFacts facts;
-        try {
-            facts = Json.read(Files.readAllBytes(factsJson), ManifestFacts.class);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read facts: " + factsJson, e);
-        }
-        RuleFile ruleFile = new RuleLoader().load(ruleYaml);
+        return analyze(AstIndex.load(astIndexDir), readFacts(factsJson), new RuleLoader().load(ruleYaml));
+    }
 
+    /** Analyze every rule in a loaded rule file against an already-loaded index + facts. */
+    public FindingsDoc analyze(AstIndex index, ManifestFacts facts, RuleFile ruleFile) {
         List<Finding> findings = new ArrayList<>();
         for (Rule rule : ruleFile.getRules()) {
             findings.addAll(analyze(index, facts, rule).findings());
@@ -57,9 +53,40 @@ public final class TaintAnalyzer {
         return new FindingsDoc("taint-engine", findings);
     }
 
+    private static ManifestFacts readFacts(Path factsJson) {
+        try {
+            return Json.read(Files.readAllBytes(factsJson), ManifestFacts.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read facts: " + factsJson, e);
+        }
+    }
+
     /** Analyze from disk and write the shared {@code FindingsDoc} JSON to {@code outJson}. */
     public void run(Path astIndexDir, Path factsJson, Path ruleYaml, Path outJson) {
         FindingsDoc doc = analyze(astIndexDir, factsJson, ruleYaml);
+        writeDoc(doc, outJson);
+    }
+
+    /** One rule file to analyze and where to write its findings. */
+    public record RuleRun(Path ruleYaml, Path outJson) {
+    }
+
+    /**
+     * Analyze several rule files against a single load of the AST index + facts. The AST index load
+     * re-parses the whole decompiled source tree (see {@link AstIndex#load}); running each rule as
+     * its own activity re-parses N times and, under Temporal fan-out, N times in parallel — the
+     * dominant cost and a memory blow-up. Loading once and looping the rules here is the parse-once
+     * path: same per-rule output files, a fraction of the work and heap.
+     */
+    public void runBatch(Path astIndexDir, Path factsJson, List<RuleRun> runs) {
+        AstIndex index = AstIndex.load(astIndexDir);
+        ManifestFacts facts = readFacts(factsJson);
+        for (RuleRun run : runs) {
+            writeDoc(analyze(index, facts, new RuleLoader().load(run.ruleYaml())), run.outJson());
+        }
+    }
+
+    private void writeDoc(FindingsDoc doc, Path outJson) {
         try {
             if (outJson.getParent() != null) {
                 Files.createDirectories(outJson.getParent());
@@ -71,14 +98,19 @@ public final class TaintAnalyzer {
     }
 
     public FindingsDoc analyze(AstIndex index, ManifestFacts facts, Rule rule) {
+        // Scope analysis to the app's own package (from manifest facts); bundled library code that a
+        // decompiled apk inlines (androidx/kotlin/com.google/android.*) is skipped from the walk but
+        // still backs type resolution. Blank package = analyze everything (source-tree fixtures).
+        String appRoot = facts.packageName();
+
         RuleMatcher matcher = RuleMatcher.forRule(rule);
-        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule).compute();
-        IccModel icc = IccModel.collect(index, matcher, rule);
+        List<MethodSummary> summaries = new SummaryComputer(index, matcher, rule, appRoot).compute();
+        IccModel icc = IccModel.collect(index, matcher, rule, appRoot);
         IntraProceduralAnalyzer analyzer = new IntraProceduralAnalyzer(index, matcher, rule, summaries, icc);
 
         ReachabilityFilter reachability = new ReachabilityFilter(facts);
         List<CandidateFinding> candidates = new ArrayList<>();
-        for (var cu : index.units()) {
+        for (var cu : index.units(appRoot)) {
             for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
                 for (CandidateFinding c : analyzer.analyzeMethod(method)) {
                     if (!reachability.keep(c, rule.getManifestConditions())) {
