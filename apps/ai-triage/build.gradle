@@ -1,0 +1,10 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    implementation project(':common')
+    implementation "com.fasterxml.jackson.core:jackson-databind:${rootProject.ext.jacksonVersion}"
+    implementation "dev.langchain4j:langchain4j:${rootProject.ext.langchain4jVersion}"
+    implementation "dev.langchain4j:langchain4j-open-ai:${rootProject.ext.langchain4jVersion}"
+}
