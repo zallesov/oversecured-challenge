@@ -26,4 +26,7 @@ dependencies {
 application {
     mainClass = 'com.oversecured.sast.orchestrator.cli.WorkerMain'
     applicationName = 'orchestrator'
+    // The taint activity re-parses the whole decompiled tree with an android.jar solver; give the
+    // worker headroom. Overridable at launch via ORCHESTRATOR_OPTS / JAVA_OPTS.
+    applicationDefaultJvmArgs = ['-Xmx4g']
 }

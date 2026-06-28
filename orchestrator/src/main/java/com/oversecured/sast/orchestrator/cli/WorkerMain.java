@@ -8,6 +8,7 @@ import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import io.temporal.worker.Worker;
 import io.temporal.worker.WorkerFactory;
+import io.temporal.worker.WorkerOptions;
 import java.nio.file.Path;
 
 public final class WorkerMain {
@@ -25,7 +26,13 @@ public final class WorkerMain {
                         .build());
         WorkflowClient client = WorkflowClient.newInstance(service);
         WorkerFactory factory = WorkerFactory.newInstance(client);
-        Worker worker = factory.newWorker(TaskQueues.DEFAULT);
+        // Cap concurrent activities: each taint/parse activity re-parses the decompiled tree with an
+        // android.jar solver (memory-heavy). Bounding peak parallelism keeps the worker off the OOM
+        // line; tune with MAX_CONCURRENT_ACTIVITIES.
+        int maxActivities = intEnv("MAX_CONCURRENT_ACTIVITIES", 4);
+        Worker worker = factory.newWorker(TaskQueues.DEFAULT, WorkerOptions.newBuilder()
+                .setMaxConcurrentActivityExecutionSize(maxActivities)
+                .build());
 
         worker.registerWorkflowImplementationTypes(AnalyzeApkWorkflowImpl.class);
         worker.registerActivitiesImplementations(new PipelineActivitiesImpl(artifactRoot));
@@ -38,5 +45,17 @@ public final class WorkerMain {
     private static String env(String name, String fallback) {
         String value = System.getenv(name);
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static int intEnv(String name, int fallback) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 }

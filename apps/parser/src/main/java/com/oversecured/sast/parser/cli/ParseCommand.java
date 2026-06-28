@@ -1,5 +1,6 @@
 package com.oversecured.sast.parser.cli;
 
+import com.oversecured.sast.common.AndroidPlatform;
 import com.oversecured.sast.common.FailureKind;
 import com.oversecured.sast.parser.AstIndex;
 import com.oversecured.sast.parser.ParserException;
@@ -40,14 +41,24 @@ public final class ParseCommand implements Callable<Integer> {
             + "resolve library calls referenced but not defined in --src. Repeat or ':'-separate.")
     List<Path> classpath = new ArrayList<>();
 
+    @Option(names = "--android-jar", negatable = true,
+        description = "Auto-add the Android SDK android.jar to the classpath when none is given "
+            + "(default: true). Disable with --no-android-jar.")
+    boolean autoAndroidJar = true;
+
     @Spec
     CommandSpec spec;
 
     @Override
     public Integer call() {
-        log.info("{} ▶️ parse --src {} --out {} (classpath: {})", FN, src, out, classpath); // ▶️
+        List<Path> resolvedClasspath = new ArrayList<>(classpath);
+        if (resolvedClasspath.isEmpty() && autoAndroidJar) {
+            // Default to the SDK android.jar so framework signatures resolve on decompiled APKs.
+            resolvedClasspath.addAll(AndroidPlatform.resolve());
+        }
+        log.info("{} ▶️ parse --src {} --out {} (classpath: {})", FN, src, out, resolvedClasspath); // ▶️
         try {
-            AstIndex index = AstIndex.build(src, classpath);
+            AstIndex index = AstIndex.build(src, resolvedClasspath);
             index.save(out);
             log.info("{} ✅ parsed {} compilation unit(s) -> {}", FN, index.units().size(), out); // ✅
             // One human summary line on stdout (logging conventions §2.1); not a step contract.

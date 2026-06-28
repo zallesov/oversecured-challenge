@@ -42,10 +42,15 @@ services:
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       ARTIFACT_ROOT: /workspace/artifacts
+      # Lets the parser's symbol solver resolve framework calls (WebView.loadUrl, etc.) on a
+      # decompiled APK; without an android.jar the taint matcher matches nothing.
+      ANDROID_HOME: /opt/android-sdk
     volumes:
       - ./artifacts:/workspace/artifacts
       - ./rules:/workspace/artifacts/rules:ro
       - ./test-subjects:/workspace/test-subjects:ro
+      # Host Android SDK, read-only — provides platforms/android-*/android.jar.
+      - ${ANDROID_SDK_ROOT:-${HOME}/Library/Android/sdk}:/opt/android-sdk:ro
 
   minio:
     image: alpine/minio:RELEASE.2025-10-15T17-29-55Z

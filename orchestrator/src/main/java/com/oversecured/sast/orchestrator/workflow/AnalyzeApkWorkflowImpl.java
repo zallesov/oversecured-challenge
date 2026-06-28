@@ -11,7 +11,7 @@ import com.oversecured.sast.orchestrator.activities.ParseActivityInput;
 import com.oversecured.sast.orchestrator.activities.PipelineActivities;
 import com.oversecured.sast.orchestrator.activities.ReportActivityInput;
 import com.oversecured.sast.orchestrator.activities.ReportArtifacts;
-import com.oversecured.sast.orchestrator.activities.TaintActivityInput;
+import com.oversecured.sast.orchestrator.activities.TaintBatchActivityInput;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
 import io.temporal.workflow.Async;
@@ -56,24 +56,28 @@ public final class AnalyzeApkWorkflowImpl implements AnalyzeApkWorkflow {
 
         Promise.allOf(astIndex, facts).get();
 
-        List<Promise<String>> analyzerFindings = new ArrayList<>();
         String astIndexDirKey = astIndex.get();
         String factsKey = facts.get();
-        for (AnalysisPlan.TaintAnalysis taint : plan.taintAnalyses()) {
-            analyzerFindings.add(Async.function(activities::runTaint, new TaintActivityInput(
-                    taint.name(),
-                    astIndexDirKey,
-                    factsKey,
-                    taint.rulePath(),
-                    taint.findingsKey())));
-        }
-        analyzerFindings.add(Async.function(activities::runManifestMisconfig, new MisconfigActivityInput(
-                plan.manifestMisconfig().name(),
-                factsKey,
-                plan.manifestMisconfig().rulePath(),
-                plan.manifestMisconfig().findingsKey())));
 
-        Promise.allOf(analyzerFindings).get();
+        // All taint rules share one AST-index load (one re-parse, one android.jar solver) instead of
+        // one re-parsing activity per rule; runs in parallel with the manifest-misconfig branch.
+        List<TaintBatchActivityInput.Rule> taintRules = new ArrayList<>();
+        for (AnalysisPlan.TaintAnalysis taint : plan.taintAnalyses()) {
+            taintRules.add(new TaintBatchActivityInput.Rule(
+                    taint.name(),
+                    taint.rulePath(),
+                    taint.findingsKey()));
+        }
+        Promise<List<String>> taintFindings = Async.function(activities::runTaintBatch,
+                new TaintBatchActivityInput(astIndexDirKey, factsKey, taintRules));
+        Promise<String> misconfigFindings = Async.function(activities::runManifestMisconfig,
+                new MisconfigActivityInput(
+                        plan.manifestMisconfig().name(),
+                        factsKey,
+                        plan.manifestMisconfig().rulePath(),
+                        plan.manifestMisconfig().findingsKey()));
+
+        Promise.allOf(taintFindings, misconfigFindings).get();
 
         ReportArtifacts report = activities.report(new ReportActivityInput(
                 plan.findingsKeysForReporter(),

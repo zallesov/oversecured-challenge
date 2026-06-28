@@ -10,6 +10,7 @@ import com.oversecured.sast.orchestrator.activities.PipelineActivitiesImpl;
 import com.oversecured.sast.orchestrator.activities.ReportActivityInput;
 import com.oversecured.sast.orchestrator.activities.ReportArtifacts;
 import com.oversecured.sast.orchestrator.activities.TaintActivityInput;
+import com.oversecured.sast.orchestrator.activities.TaintBatchActivityInput;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -67,6 +68,29 @@ class PipelineActivitiesImplTest {
                 "report:2->" + root.resolve("runs/r1/report.html").toAbsolutePath().normalize() + ":" + root.resolve("runs/r1/report.sarif").toAbsolutePath().normalize());
     }
 
+    @Test
+    void runTaintBatchResolvesAllRulesFromOneCallAndReturnsKeys(@TempDir Path root) {
+        RecordingStepApis apis = new RecordingStepApis();
+        PipelineActivitiesImpl activities = PipelineActivitiesImpl.forTesting(root, apis);
+
+        List<String> keys = activities.runTaintBatch(new TaintBatchActivityInput(
+                "runs/r1/ast-index",
+                "runs/r1/facts.json",
+                List.of(
+                        new TaintBatchActivityInput.Rule("webview", "rules/webview.yaml", "runs/r1/findings-webview.json"),
+                        new TaintBatchActivityInput.Rule("pathtraversal", "rules/pathtraversal.yaml", "runs/r1/findings-pathtraversal.json"))));
+
+        assertThat(keys).containsExactly(
+                "runs/r1/findings-webview.json",
+                "runs/r1/findings-pathtraversal.json");
+        assertThat(apis.calls).containsExactly(
+                "taint-batch:" + root.resolve("runs/r1/ast-index").toAbsolutePath().normalize()
+                        + ";webview:" + root.resolve("rules/webview.yaml").toAbsolutePath().normalize()
+                        + "->" + root.resolve("runs/r1/findings-webview.json").toAbsolutePath().normalize()
+                        + ";pathtraversal:" + root.resolve("rules/pathtraversal.yaml").toAbsolutePath().normalize()
+                        + "->" + root.resolve("runs/r1/findings-pathtraversal.json").toAbsolutePath().normalize());
+    }
+
     private static final class RecordingStepApis implements PipelineActivitiesImpl.StepApis {
         private final List<String> calls = new ArrayList<>();
 
@@ -88,6 +112,16 @@ class PipelineActivitiesImplTest {
         @Override
         public void runTaint(String analysisName, Path astIndexDir, Path factsJson, Path ruleYaml, Path findingsJson) {
             calls.add("taint:" + analysisName + ":" + ruleYaml + "->" + findingsJson);
+        }
+
+        @Override
+        public void runTaintBatch(Path astIndexDir, Path factsJson,
+                List<PipelineActivitiesImpl.TaintRuleSpec> rules) {
+            StringBuilder sb = new StringBuilder("taint-batch:" + astIndexDir);
+            for (PipelineActivitiesImpl.TaintRuleSpec spec : rules) {
+                sb.append(";").append(spec.name()).append(":").append(spec.ruleYaml()).append("->").append(spec.findingsJson());
+            }
+            calls.add(sb.toString());
         }
 
         @Override

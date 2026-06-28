@@ -11,6 +11,7 @@ import com.oversecured.sast.orchestrator.activities.PipelineActivities;
 import com.oversecured.sast.orchestrator.activities.ReportActivityInput;
 import com.oversecured.sast.orchestrator.activities.ReportArtifacts;
 import com.oversecured.sast.orchestrator.activities.TaintActivityInput;
+import com.oversecured.sast.orchestrator.activities.TaintBatchActivityInput;
 import com.oversecured.sast.orchestrator.workflow.AnalyzeApkWorkflow;
 import com.oversecured.sast.orchestrator.workflow.AnalyzeApkWorkflowImpl;
 import io.temporal.client.WorkflowClient;
@@ -53,9 +54,8 @@ class AnalyzeApkWorkflowTest {
         assertThat(activities.calls.subList(1, 3)).containsExactlyInAnyOrder(
                 "parse:runs/run-1/ast-index",
                 "manifest-facts:runs/run-1/facts.json");
-        assertThat(activities.calls.subList(3, 6)).containsExactlyInAnyOrder(
-                "taint:webview:runs/run-1/findings-webview.json",
-                "taint:pathtraversal:runs/run-1/findings-pathtraversal.json",
+        assertThat(activities.calls.subList(3, 5)).containsExactlyInAnyOrder(
+                "taint-batch:webview,pathtraversal",
                 "misconfig:manifest-misconfig:runs/run-1/findings-misconfig.json");
         assertThat(activities.calls).endsWith("report:runs/run-1/report.html:runs/run-1/report.sarif");
 
@@ -130,7 +130,7 @@ class AnalyzeApkWorkflowTest {
         private final boolean requireConcurrentFanOut;
         private final List<String> calls = new ArrayList<>();
         private final CountDownLatch prereqStarted = new CountDownLatch(2);
-        private final CountDownLatch analyzerStarted = new CountDownLatch(3);
+        private final CountDownLatch analyzerStarted = new CountDownLatch(2);
         private boolean parseAndFactsWereConcurrentlyStarted;
         private boolean analyzersWereConcurrentlyStarted;
         private ReportActivityInput reportInput;
@@ -173,6 +173,22 @@ class AnalyzeApkWorkflowTest {
                 calls.add("taint:" + input.analysisName() + ":" + input.findingsKey());
             }
             return input.findingsKey();
+        }
+
+        @Override
+        public List<String> runTaintBatch(TaintBatchActivityInput input) {
+            awaitFanOutIfRequired(analyzerStarted);
+            List<String> keys = new ArrayList<>();
+            List<String> names = new ArrayList<>();
+            for (TaintBatchActivityInput.Rule rule : input.rules()) {
+                names.add(rule.name());
+                keys.add(rule.findingsKey());
+            }
+            synchronized (this) {
+                analyzersWereConcurrentlyStarted = true;
+                calls.add("taint-batch:" + String.join(",", names));
+            }
+            return keys;
         }
 
         @Override
@@ -241,14 +257,23 @@ class AnalyzeApkWorkflowTest {
 
         @Override
         public String runTaint(TaintActivityInput input) {
-            if ("webview".equals(input.analysisName())) {
-                webviewAttempts++;
-                webviewKeys.add(input.findingsKey());
-                if (webviewAttempts < webviewSucceedsOnAttempt) {
-                    throw new IllegalStateException("temporary taint failure");
+            return input.findingsKey();
+        }
+
+        @Override
+        public List<String> runTaintBatch(TaintBatchActivityInput input) {
+            webviewAttempts++;
+            List<String> keys = new ArrayList<>();
+            for (TaintBatchActivityInput.Rule rule : input.rules()) {
+                keys.add(rule.findingsKey());
+                if ("webview".equals(rule.name())) {
+                    webviewKeys.add(rule.findingsKey());
                 }
             }
-            return input.findingsKey();
+            if (webviewAttempts < webviewSucceedsOnAttempt) {
+                throw new IllegalStateException("temporary taint failure");
+            }
+            return keys;
         }
 
         @Override

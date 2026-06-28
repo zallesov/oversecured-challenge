@@ -1,5 +1,6 @@
 package com.oversecured.sast.orchestrator.activities;
 
+import com.oversecured.sast.common.AndroidPlatform;
 import com.oversecured.sast.decompiler.Decompiler;
 import com.oversecured.sast.parser.AstIndex;
 import com.oversecured.sast.reporter.FindingsMerger;
@@ -11,6 +12,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 public final class PipelineActivitiesImpl implements PipelineActivities {
@@ -66,6 +68,23 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
     }
 
     @Override
+    public List<String> runTaintBatch(TaintBatchActivityInput input) {
+        Path astIndexDir = paths.resolveArtifactKey(input.astIndexDirKey());
+        Path factsJson = paths.resolveArtifactKey(input.factsKey());
+        List<TaintRuleSpec> specs = new ArrayList<>();
+        List<String> findingsKeys = new ArrayList<>();
+        for (TaintBatchActivityInput.Rule rule : input.rules()) {
+            specs.add(new TaintRuleSpec(
+                    rule.name(),
+                    paths.resolveArtifactKey(rule.rulePath()),
+                    paths.resolveArtifactKey(rule.findingsKey())));
+            findingsKeys.add(rule.findingsKey());
+        }
+        apis.runTaintBatch(astIndexDir, factsJson, specs);
+        return findingsKeys;
+    }
+
+    @Override
     public String runManifestMisconfig(MisconfigActivityInput input) {
         Path factsJson = paths.resolveArtifactKey(input.factsKey());
         Path ruleYaml = paths.resolveArtifactKey(input.rulePath());
@@ -85,6 +104,10 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         return new ReportArtifacts(input.htmlKey(), input.sarifKey());
     }
 
+    /** One taint rule to run in a batch: its name, resolved rule file, and resolved output file. */
+    public record TaintRuleSpec(String name, Path ruleYaml, Path findingsJson) {
+    }
+
     public interface StepApis {
         void decompile(Path apk, Path sourcesDir);
 
@@ -93,6 +116,8 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
         void extractManifestFacts(Path manifestXml, Path factsJson);
 
         void runTaint(String analysisName, Path astIndexDir, Path factsJson, Path ruleYaml, Path findingsJson);
+
+        void runTaintBatch(Path astIndexDir, Path factsJson, List<TaintRuleSpec> rules);
 
         void runManifestMisconfig(String analysisName, Path factsJson, Path ruleYaml, Path findingsJson);
 
@@ -107,7 +132,10 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
 
         @Override
         public void parse(Path sourcesDir, Path astIndexDir) {
-            AstIndex.build(sourcesDir).save(astIndexDir);
+            // Default the resolution classpath to the Android SDK android.jar so framework calls
+            // (WebView.loadUrl, Intent.getStringExtra) resolve on a decompiled APK; without it the
+            // taint signature matcher matches nothing. Fail-soft: empty when no SDK is found.
+            AstIndex.build(sourcesDir, AndroidPlatform.resolve()).save(astIndexDir);
         }
 
         @Override
@@ -140,6 +168,15 @@ public final class PipelineActivitiesImpl implements PipelineActivities {
                 }
                 throw new IllegalStateException("TaintAnalyzer.run failed for " + analysisName, cause);
             }
+        }
+
+        @Override
+        public void runTaintBatch(Path astIndexDir, Path factsJson, List<TaintRuleSpec> rules) {
+            List<com.oversecured.sast.taint.TaintAnalyzer.RuleRun> runs = new ArrayList<>();
+            for (TaintRuleSpec spec : rules) {
+                runs.add(new com.oversecured.sast.taint.TaintAnalyzer.RuleRun(spec.ruleYaml(), spec.findingsJson()));
+            }
+            new com.oversecured.sast.taint.TaintAnalyzer().runBatch(astIndexDir, factsJson, runs);
         }
 
         @Override
