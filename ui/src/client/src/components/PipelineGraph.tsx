@@ -20,7 +20,8 @@ const preferredStages = [
   ['decompile'],
   ['parse', 'manifest-facts'],
   ['taint', 'manifest-misconfig'],
-  ['report']
+  ['report'],
+  ['ai-triage']
 ];
 
 const stateIcon: Record<NodeState, ReactElement> = {
@@ -71,19 +72,51 @@ function buildStages(nodes: RunNode[]): RunNode[][] {
   return stages;
 }
 
+function ruleLabel(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  for (const key of ['rule', 'ruleId', 'id'] as const) {
+    const field = candidate[key];
+    if (typeof field === 'string' && field.length > 0) {
+      return field;
+    }
+  }
+
+  return null;
+}
+
 function metricSummary(node: RunNode): string | null {
   if (node.id !== 'taint' && Object.keys(node.metrics ?? {}).length === 0) {
     return null;
   }
 
   const ruleCount = node.metrics?.ruleCount;
+
+  if (node.id === 'taint') {
+    const rules = Array.isArray(node.metrics?.rules) ? node.metrics.rules : null;
+    if (rules && rules.length > 0) {
+      const labels = rules
+        .map(ruleLabel)
+        .filter((label): label is string => Boolean(label));
+      if (labels.length > 0) {
+        const suffix = labels.length !== rules.length ? ` (+${rules.length - labels.length} more)` : '';
+        return `Rules: ${labels.join(', ')}${suffix}`;
+      }
+    }
+
+    if (typeof ruleCount === 'number') {
+      return `Rules: ${ruleCount}`;
+    }
+
+    return 'Aggregate taint analyzer node';
+  }
+
   const parts = Object.entries(node.metrics ?? {})
     .slice(0, 3)
     .map(([key, value]) => `${key}: ${String(value)}`);
-
-  if (node.id === 'taint' && ruleCount == null && parts.length === 0) {
-    return 'Aggregate taint analyzer node';
-  }
 
   return parts.length > 0 ? parts.join(' · ') : null;
 }

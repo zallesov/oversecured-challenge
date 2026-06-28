@@ -1,5 +1,12 @@
 import { LogOut, RefreshCw, ShieldCheck, UploadCloud } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { api, ApiError, clearToken, getToken, setToken, type Run, type User } from './api';
 import { RunDetail } from './components/RunDetail';
 import { RunList } from './components/RunList';
@@ -100,7 +107,25 @@ function AuthGate({ onAuthenticated }: { onAuthenticated: (user: User) => void }
   );
 }
 
-function UploadPanel({ onUploaded }: { onUploaded: (run: Run) => void }) {
+type AppRoute =
+  | { kind: 'runs' }
+  | { kind: 'run-detail'; runId: string };
+
+function parseRoute(pathname: string): AppRoute {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  const match = normalized.match(/^\/runs\/([^/]+)$/);
+  if (match) {
+    return { kind: 'run-detail', runId: decodeURIComponent(match[1]) };
+  }
+  return { kind: 'runs' };
+}
+
+function UploadPanel({
+  onUploaded
+}: {
+  onUploaded: (run: Run) => void;
+}) {
+  const formRef = useRef<HTMLFormElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,9 +141,9 @@ function UploadPanel({ onUploaded }: { onUploaded: (run: Run) => void }) {
     setError(null);
     try {
       const run = await api.uploadRun(file);
+      formRef.current?.reset();
       setFile(null);
       onUploaded(run);
-      event.currentTarget.reset();
     } catch (nextError) {
       setError(messageFor(nextError));
     } finally {
@@ -134,7 +159,7 @@ function UploadPanel({ onUploaded }: { onUploaded: (run: Run) => void }) {
           <p>Start a scan from a signed or debug APK package.</p>
         </div>
       </div>
-      <form className="upload-form" onSubmit={submit}>
+      <form ref={formRef} className="upload-form" onSubmit={submit}>
         <label className="file-drop">
           <UploadCloud size={22} aria-hidden="true" />
           <span>{file ? file.name : 'Choose .apk file'}</span>
@@ -158,14 +183,20 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pathname, setPathname] = useState(() => window.location.pathname);
 
-  const selectedRun = useMemo(
-    () => runs.find((run) => run.id === selectedRunId) ?? null,
-    [runs, selectedRunId]
-  );
+  const route = useMemo(() => parseRoute(pathname), [pathname]);
+  const selectedRunId = route.kind === 'run-detail' ? route.runId : null;
+  const navigate = useCallback((nextPath: string, options?: { replace?: boolean }) => {
+    if (options?.replace) {
+      window.history.replaceState({}, '', nextPath);
+    } else {
+      window.history.pushState({}, '', nextPath);
+    }
+    setPathname(window.location.pathname);
+  }, []);
 
   const loadRuns = useCallback(async () => {
     setLoadingRuns(true);
@@ -173,12 +204,17 @@ export default function App() {
     try {
       const nextRuns = await api.listRuns();
       setRuns(nextRuns);
-      setSelectedRunId((current) => current ?? nextRuns[0]?.id ?? null);
     } catch (nextError) {
       setError(messageFor(nextError));
     } finally {
       setLoadingRuns(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => setPathname(window.location.pathname);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   useEffect(() => {
@@ -214,9 +250,18 @@ export default function App() {
     }
   }, [loadRuns, user]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    if (pathname === '/' || pathname === '') {
+      navigate('/runs', { replace: true });
+    }
+  }, [navigate, pathname, user]);
+
   function handleUploaded(run: Run) {
     setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
-    setSelectedRunId(run.id);
+    navigate(`/runs/${run.id}`);
   }
 
   function handleRunUpdated(run: Run) {
@@ -227,7 +272,7 @@ export default function App() {
     clearToken();
     setUser(null);
     setRuns([]);
-    setSelectedRunId(null);
+    navigate('/runs', { replace: true });
   }
 
   if (booting) {
@@ -255,10 +300,6 @@ export default function App() {
         </div>
         <div className="header-actions">
           <span className="user-email">{user.email}</span>
-          <button className="icon-button" type="button" onClick={loadRuns} disabled={loadingRuns} title="Refresh scans">
-            <RefreshCw size={17} aria-hidden="true" className={loadingRuns ? 'spin' : ''} />
-            <span className="sr-only">Refresh scans</span>
-          </button>
           <button className="secondary-button" type="button" onClick={logout}>
             <LogOut size={16} aria-hidden="true" />
             Sign out
@@ -273,12 +314,16 @@ export default function App() {
           <UploadPanel onUploaded={handleUploaded} />
           <RunList
             runs={runs}
-            selectedRunId={selectedRun?.id ?? null}
+            selectedRunId={selectedRunId}
             loading={loadingRuns}
-            onSelectRun={setSelectedRunId}
+            onSelectRun={(id) => navigate(`/runs/${id}`)}
           />
         </aside>
-        <RunDetail runId={selectedRunId} onRunUpdated={handleRunUpdated} />
+        <RunDetail
+          runId={selectedRunId}
+          onRunUpdated={handleRunUpdated}
+          onGoToRuns={route.kind === 'run-detail' ? () => navigate('/runs') : undefined}
+        />
       </main>
     </div>
   );

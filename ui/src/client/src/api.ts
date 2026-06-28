@@ -169,7 +169,7 @@ export const api = {
     return request<Finding[]>(`/api/runs/${encodeURIComponent(id)}/findings`);
   },
 
-  async getReport(id: string, kind: 'html' | 'sarif'): Promise<Blob> {
+  async getReport(id: string, kind: 'html' | 'sarif' | 'ai-triage'): Promise<Blob> {
     const response = await fetch(`/api/runs/${encodeURIComponent(id)}/reports/${kind}`, {
       headers: authHeaders()
     });

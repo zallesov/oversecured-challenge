@@ -22,7 +22,7 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.use(authRoutes);
+app.use("/auth", authRoutes);
 app.use(runRoutes);
 
 if (process.env.NODE_ENV === "production") {
@@ -53,7 +53,7 @@ app.use(errorHandler);
 
 export async function startServer(): Promise<void> {
   await runMigrations();
-  startStatusSync(Number(process.env.STATUS_SYNC_INTERVAL_MS ?? 1000));
+  startStatusSync(Number(process.env.STATUS_SYNC_INTERVAL_MS ?? 5000));
 
   const port = Number(process.env.PORT ?? 3000);
   app.listen(port, () => {

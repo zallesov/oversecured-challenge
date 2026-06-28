@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -398,6 +399,32 @@ router.get(
 
     res.type("application/sarif+json");
     res.sendFile(resolveArtifactKey(run.report_sarif_key, artifactRoot()));
+  }),
+);
+
+router.get(
+  "/api/runs/:id/reports/ai-triage",
+  asyncHandler(async (req, res) => {
+    const user = authUser(req);
+    const run = await findOwnedRun(routeParam(req.params.id), user.id);
+    if (!run) {
+      res.status(404).json({ error: "Run not found" });
+      return;
+    }
+
+    // The AI triage sidecar is written by the always-on ai-triage step to a
+    // deterministic key under the run's artifact root.
+    const mdPath = resolveArtifactKey(
+      `${run.artifact_root}/ai-triage.md`,
+      artifactRoot(),
+    );
+    if (!existsSync(mdPath)) {
+      res.status(404).json({ error: "AI triage report not found" });
+      return;
+    }
+
+    res.type("text/markdown");
+    res.sendFile(mdPath);
   }),
 );
 

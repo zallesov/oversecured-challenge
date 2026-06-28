@@ -603,7 +603,7 @@ button.graph-node:hover,
 
 .finding-row {
   display: grid;
-  grid-template-columns: 120px minmax(160px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(92px, 120px) minmax(180px, 1fr) minmax(0, 2fr);
   min-width: 0;
 }
 
@@ -620,6 +620,7 @@ button.graph-node:hover,
 }
 
 .finding-item {
+  display: block;
   border-top: 1px solid #e2e8f0;
 }
 
@@ -627,9 +628,10 @@ button.graph-node:hover,
   cursor: pointer;
   display: grid;
   gap: 0;
-  grid-template-columns: 120px minmax(160px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(92px, 120px) minmax(180px, 1fr) minmax(0, 2fr);
   list-style: none;
   min-width: 0;
+  width: 100%;
 }
 
 .finding-item summary::-webkit-details-marker {
@@ -644,35 +646,39 @@ button.graph-node:hover,
 }
 
 .severity-pill {
-  border-radius: 999px;
-  color: #ffffff;
-  font-size: 0.7rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: #991b1b;
+  font-size: 0.78rem;
   font-weight: 900;
-  justify-content: center;
-  max-width: max-content;
-  min-height: 24px;
-  padding: 0 8px;
+  justify-content: flex-start;
+  max-width: none;
+  min-height: 0;
+  padding: 0;
+  text-transform: uppercase;
 }
 
 .severity-pill.critical,
 .severity-pill.error,
 .severity-pill.high {
-  background: #b91c1c;
+  color: #b91c1c;
 }
 
 .severity-pill.warning,
 .severity-pill.medium {
-  background: #b45309;
+  color: #b45309;
 }
 
 .severity-pill.low,
 .severity-pill.note,
 .severity-pill.info {
-  background: #2563eb;
+  color: #2563eb;
 }
 
 .finding-rule,
 .finding-message {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 

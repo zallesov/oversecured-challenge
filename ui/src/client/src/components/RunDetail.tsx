@@ -1,5 +1,5 @@
-import { Download, ExternalLink, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Download, ExternalLink, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, type Finding, type Run, type RunNode } from '../api';
 import { FindingTable } from './FindingTable';
 import { PipelineGraph } from './PipelineGraph';
@@ -7,6 +7,7 @@ import { PipelineGraph } from './PipelineGraph';
 type RunDetailProps = {
   runId: string | null;
   onRunUpdated?: (run: Run) => void;
+  onGoToRuns?: () => void;
 };
 
 function isActive(status?: string): boolean {
@@ -35,30 +36,39 @@ function errorMessage(error: unknown): string {
   return 'Unexpected error';
 }
 
-export function RunDetail({ runId, onRunUpdated }: RunDetailProps) {
+export function RunDetail({ runId, onRunUpdated, onGoToRuns }: RunDetailProps) {
   const [run, setRun] = useState<Run | null>(null);
   const [nodes, setNodes] = useState<RunNode[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reportBusy, setReportBusy] = useState<'html' | 'sarif' | null>(null);
+  const [reportBusy, setReportBusy] = useState<'html' | 'sarif' | 'ai-triage' | null>(null);
+  const refreshInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!runId) {
       return;
     }
+    if (refreshInFlight.current) {
+      return;
+    }
 
+    refreshInFlight.current = true;
     setError(null);
-    const [nextRun, nextNodes, nextFindings] = await Promise.all([
-      api.getRun(runId),
-      api.getRunNodes(runId),
-      api.getRunFindings(runId)
-    ]);
-    setRun(nextRun);
-    setNodes(nextNodes);
-    setFindings(nextFindings);
-    onRunUpdated?.(nextRun);
+    try {
+      const [nextRun, nextNodes] = await Promise.all([api.getRun(runId), api.getRunNodes(runId)]);
+      setRun(nextRun);
+      setNodes(nextNodes);
+      onRunUpdated?.(nextRun);
+
+      if (!isActive(nextRun.status)) {
+        const nextFindings = await api.getRunFindings(runId);
+        setFindings(nextFindings);
+      }
+    } finally {
+      refreshInFlight.current = false;
+    }
   }, [onRunUpdated, runId]);
 
   useEffect(() => {
@@ -100,7 +110,7 @@ export function RunDetail({ runId, onRunUpdated }: RunDetailProps) {
           setError(errorMessage(nextError));
         }
       });
-    }, 1000);
+    }, 4000);
 
     return () => {
       cancelled = true;
@@ -113,7 +123,7 @@ export function RunDetail({ runId, onRunUpdated }: RunDetailProps) {
     [nodes, selectedNodeId]
   );
 
-  async function openReport(kind: 'html' | 'sarif') {
+  async function openReport(kind: 'html' | 'sarif' | 'ai-triage') {
     if (!runId) {
       return;
     }
@@ -122,7 +132,7 @@ export function RunDetail({ runId, onRunUpdated }: RunDetailProps) {
     try {
       const blob = await api.getReport(runId, kind);
       const url = window.URL.createObjectURL(blob);
-      if (kind === 'html') {
+      if (kind === 'html' || kind === 'ai-triage') {
         window.open(url, '_blank', 'noopener,noreferrer');
       } else {
         const anchor = document.createElement('a');
@@ -156,8 +166,14 @@ export function RunDetail({ runId, onRunUpdated }: RunDetailProps) {
             <p>{run?.message ?? (loading ? 'Loading scan status' : 'No status message')}</p>
           </div>
           <div className="detail-actions">
+            {onGoToRuns ? (
+              <button className="secondary-button" type="button" onClick={onGoToRuns}>
+                <ArrowLeft size={16} aria-hidden="true" />
+                All scans
+              </button>
+            ) : null}
             <button className="icon-button" type="button" onClick={refresh} disabled={loading} title="Refresh scan">
-              <RefreshCw size={17} aria-hidden="true" className={loading ? 'spin' : ''} />
+              <RefreshCw size={17} aria-hidden="true" />
               <span className="sr-only">Refresh scan</span>
             </button>
             <button
@@ -177,6 +193,16 @@ export function RunDetail({ runId, onRunUpdated }: RunDetailProps) {
             >
               <Download size={16} aria-hidden="true" />
               SARIF
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => openReport('ai-triage')}
+              disabled={!run || reportBusy !== null}
+              title="AI triage verdicts and fixes"
+            >
+              <ExternalLink size={16} aria-hidden="true" />
+              AI Triage
             </button>
           </div>
         </div>
