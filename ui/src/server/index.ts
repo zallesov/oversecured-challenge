@@ -9,8 +9,6 @@ import express, {
   type Response,
 } from "express";
 
-import { runMigrations } from "./db.js";
-import authRoutes from "./routes/auth.js";
 import runRoutes from "./routes/runs.js";
 import { startStatusSync } from "./services/status-sync.js";
 
@@ -22,7 +20,6 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.use("/auth", authRoutes);
 app.use(runRoutes);
 
 if (process.env.NODE_ENV === "production") {
@@ -52,7 +49,6 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
 app.use(errorHandler);
 
 export async function startServer(): Promise<void> {
-  await runMigrations();
   startStatusSync(Number(process.env.STATUS_SYNC_INTERVAL_MS ?? 5000));
 
   const port = Number(process.env.PORT ?? 3000);
