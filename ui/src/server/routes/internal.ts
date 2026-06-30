@@ -9,7 +9,8 @@ import {
 
 const router = Router();
 
-// Machine-to-machine auth: the worker echoes the per-job secret the backend minted at submit time.
+// Machine-to-machine auth: the worker echoes the shared STATUS_CALLBACK_SECRET the backend passed in
+// each job's callback header at submit time.
 function secretOk(provided: string | undefined): boolean {
   const expected = process.env.STATUS_CALLBACK_SECRET ?? "";
   if (!expected || !provided) {
