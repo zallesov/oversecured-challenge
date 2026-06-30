@@ -1,4 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { Client, Connection } from "@temporalio/client";
+import type { WorkflowClientInterceptor } from "@temporalio/client";
+import { defaultPayloadConverter } from "@temporalio/common";
 
 const TASK_QUEUE = "android-sast-pipeline";
 const WORKFLOW_TYPE = "AnalyzeApkWorkflow";
@@ -70,13 +74,44 @@ export type WorkflowNodeStatus = {
   severityCounts: Record<string, number>;
 };
 
+/** Per-job status callback target, injected as a Temporal header at workflow start. */
+export type CallbackInfo = { url: string; secret: string; runId: string };
+
+// Per-start callback values are threaded through AsyncLocalStorage so the client interceptor can read
+// them without a per-call interceptor instance.
+const callbackStore = new AsyncLocalStorage<CallbackInfo>();
+
+const callbackHeaderInterceptor: WorkflowClientInterceptor = {
+  async start(input, next) {
+    const cb = callbackStore.getStore();
+    if (!cb) {
+      return next(input);
+    }
+    return next({
+      ...input,
+      headers: {
+        ...input.headers,
+        callbackUrl: defaultPayloadConverter.toPayload(cb.url),
+        callbackSecret: defaultPayloadConverter.toPayload(cb.secret),
+        runId: defaultPayloadConverter.toPayload(cb.runId),
+      },
+    });
+  },
+};
+
 let clientPromise: Promise<Client> | null = null;
 
 async function temporalClient(): Promise<Client> {
   if (!clientPromise) {
     clientPromise = Connection.connect({
       address: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
-    }).then((connection) => new Client({ connection }));
+    }).then(
+      (connection) =>
+        new Client({
+          connection,
+          interceptors: { workflow: [callbackHeaderInterceptor] },
+        }),
+    );
   }
   return clientPromise;
 }
@@ -122,15 +157,21 @@ export function buildAnalysisPlan(runId: string): AnalysisPlan {
 export async function startAnalysisWorkflow(
   runId: string,
   apkPath: string,
+  callback?: CallbackInfo,
 ): Promise<string> {
   const client = await temporalClient();
   const workflowId = workflowIdForRun(runId);
 
-  const handle = await client.workflow.start(WORKFLOW_TYPE, {
-    taskQueue: TASK_QUEUE,
-    workflowId,
-    args: [{ apkPath, plan: buildAnalysisPlan(runId) }],
-  });
+  const startWorkflow = () =>
+    client.workflow.start(WORKFLOW_TYPE, {
+      taskQueue: TASK_QUEUE,
+      workflowId,
+      args: [{ apkPath, plan: buildAnalysisPlan(runId) }],
+    });
+
+  const handle = callback
+    ? await callbackStore.run(callback, startWorkflow)
+    : await startWorkflow();
 
   return handle.workflowId;
 }
