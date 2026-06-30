@@ -50,7 +50,8 @@ services:
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:0.28.4
     restart: unless-stopped
-    command: ["serve", "--migrationsDir", "/pb_migrations"]
+    # Bind 0.0.0.0 so other containers/the browser can reach PB, and pin the data dir to the volume.
+    command: ["serve", "--http=0.0.0.0:8090", "--dir", "/pb_data", "--migrationsDir", "/pb_migrations"]
     environment:
       PB_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL:?set POCKETBASE_ADMIN_EMAIL in .env.server}
       PB_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD:?set POCKETBASE_ADMIN_PASSWORD in .env.server}
@@ -87,7 +88,6 @@ services:
       STATUS_CALLBACK_SECRET: ${STATUS_CALLBACK_SECRET:?set STATUS_CALLBACK_SECRET in .env.server}
       TEMPORAL_ADDRESS: temporal:7233
       ARTIFACT_ROOT: /workspace/artifacts
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.server}
       NODE_ENV: production
       PORT: "3000"
     ports:

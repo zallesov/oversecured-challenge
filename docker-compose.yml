@@ -34,7 +34,8 @@ services:
 
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:0.28.4
-    command: ["serve", "--migrationsDir", "/pb_migrations"]
+    # Bind 0.0.0.0 so other containers/the browser can reach PB, and pin the data dir to the volume.
+    command: ["serve", "--http=0.0.0.0:8090", "--dir", "/pb_data", "--migrationsDir", "/pb_migrations"]
     environment:
       # Dev defaults — documented, not secret
       PB_ADMIN_EMAIL: admin@example.com
@@ -67,7 +68,6 @@ services:
       STATUS_CALLBACK_SECRET: dev-callback-secret
       TEMPORAL_ADDRESS: temporal:7233
       ARTIFACT_ROOT: /workspace/artifacts
-      JWT_SECRET: local-dev-secret
       PORT: "3000"
     ports:
       - "3000:3000"
