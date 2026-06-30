@@ -1,7 +1,6 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 
-import { verifyUserToken } from "./pb.js";
-import type { AuthUser } from "./pb.js";
+import { verifyUserToken, type AuthUser } from "./pb.js";
 
 export type { AuthUser };
 

@@ -6,10 +6,13 @@ export type AuthUser = { id: string; email: string };
 
 // Module-level singleton admin client
 let _adminPb: PocketBase | null = null;
+// In-flight re-auth promise to prevent concurrent duplicate authWithPassword calls
+let _authPromise: Promise<void> | null = null;
 
 /**
  * Cached PocketBase client authenticated as superuser.
  * Re-authenticates if the cached token is invalid.
+ * Concurrent callers share a single in-flight auth promise.
  */
 export async function adminPb(): Promise<PocketBase> {
   const email = process.env.POCKETBASE_ADMIN_EMAIL;
@@ -26,9 +29,12 @@ export async function adminPb(): Promise<PocketBase> {
   }
 
   if (!_adminPb.authStore.isValid) {
-    await _adminPb
+    _authPromise ??= _adminPb
       .collection("_superusers")
-      .authWithPassword(email, password);
+      .authWithPassword(email, password)
+      .then(() => { _authPromise = null; })
+      .catch((e) => { _authPromise = null; throw e; });
+    await _authPromise;
   }
 
   return _adminPb;
