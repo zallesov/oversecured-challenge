@@ -31,8 +31,11 @@ public record StatusEvent(
                 Map.of(), List.of(), 0, Map.of(), null);
     }
 
-    /** Build event from an activity's returned StepResult (COMPLETED or FAILED soft). */
-    public static StatusEvent fromResult(String runId, StepResult result, String occurredAt) {
+    /** Build event from an activity's returned StepResult (COMPLETED or FAILED soft).
+     *  The {@code nodeId} parameter overrides {@code result.nodeId()} so that the RUNNING
+     *  and COMPLETED/FAILED events for one activity always carry the same node identifier.
+     */
+    public static StatusEvent fromResult(String runId, String nodeId, StepResult result, String occurredAt) {
         Map<String, Integer> severityCounts = result.severityCounts() == null
                 ? Map.of()
                 : result.severityCounts().entrySet().stream()
@@ -46,7 +49,7 @@ public record StatusEvent(
 
         return new StatusEvent(
                 runId,
-                result.nodeId(),
+                nodeId,
                 result.state().name(),
                 result.message(),
                 occurredAt,

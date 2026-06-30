@@ -29,7 +29,7 @@ class StatusEventTest {
                 2,
                 Map.of(Severity.ERROR, 1, Severity.WARNING, 1));
 
-        StatusEvent event = StatusEvent.fromResult(RUN_ID, result, OCCURRED_AT);
+        StatusEvent event = StatusEvent.fromResult(RUN_ID, NODE_ID, result, OCCURRED_AT);
 
         assertThat(event.runId()).isEqualTo(RUN_ID);
         assertThat(event.nodeId()).isEqualTo(NODE_ID);
@@ -46,7 +46,7 @@ class StatusEventTest {
     void fromResultFailedHasErrorPopulated() {
         StepResult result = StepResult.failed(NODE_ID, "something went wrong", new StepError("IO_ERROR", "disk full"));
 
-        StatusEvent event = StatusEvent.fromResult(RUN_ID, result, OCCURRED_AT);
+        StatusEvent event = StatusEvent.fromResult(RUN_ID, NODE_ID, result, OCCURRED_AT);
 
         assertThat(event.state()).isEqualTo("FAILED");
         assertThat(event.error()).isNotNull();

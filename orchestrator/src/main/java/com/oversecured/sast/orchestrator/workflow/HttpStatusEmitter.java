@@ -7,6 +7,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -23,10 +24,7 @@ public final class HttpStatusEmitter implements StatusEmitter {
     private final ObjectMapper objectMapper;
 
     public HttpStatusEmitter() {
-        this(HttpClient.newBuilder()
-                .connectTimeout(TIMEOUT)
-                .build(),
-             new ObjectMapper());
+        this(HttpClient.newBuilder().build(), new ObjectMapper());
     }
 
     HttpStatusEmitter(HttpClient httpClient, ObjectMapper objectMapper) {
@@ -45,7 +43,7 @@ public final class HttpStatusEmitter implements StatusEmitter {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .timeout(TIMEOUT)
                     .build();
-            httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding()).get(3, TimeUnit.SECONDS);
         } catch (Throwable t) {
             LOG.log(Level.FINE, "Status emit failed (best-effort, ignored)", t);
         }

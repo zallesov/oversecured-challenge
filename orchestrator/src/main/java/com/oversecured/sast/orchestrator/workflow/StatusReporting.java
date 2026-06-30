@@ -56,13 +56,14 @@ public final class StatusReporting {
                 // extractor failure: skip result emit
             }
             if (stepResult != null) {
-                safeEmit(emitter, ctx, StatusEvent.fromResult(runId, stepResult, clock.get()));
+                safeEmit(emitter, ctx, StatusEvent.fromResult(runId, nodeId, stepResult, clock.get()));
             }
             return out;
-        } catch (Exception e) {
-            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        } catch (Throwable t) {
+            String msg = t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
             safeEmit(emitter, ctx, StatusEvent.failed(runId, nodeId, msg, clock.get()));
-            throw e;
+            if (t instanceof Error e) throw e;
+            throw (Exception) t;
         }
     }
 

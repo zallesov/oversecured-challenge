@@ -148,4 +148,52 @@ class StatusReportingTest {
         // Must not throw
         emitter.emit(ctx, event);
     }
+
+    // --- Finding 2: nodeId coherence ---
+
+    @Test
+    void runWithEmit_nodeIdCoherence_runningAndCompletedCarrySameNodeId() throws Exception {
+        // The StepResult has a different nodeId than the parameter — the parameter must win.
+        String differentNodeId = "result-internal-node";
+        StepResult resultWithDifferentNodeId = StepResult.completed(
+                differentNodeId, "done", Map.of(), List.<ArtifactRef>of(), List.of(), 0, Map.of());
+
+        List<StatusEvent> captured = new ArrayList<>();
+        StatusEmitter emitter = newCapturing(captured);
+
+        StatusReporting.runWithEmit(
+                PRESENT_CTX, RUN_ID, NODE_ID,
+                () -> OCCURRED_AT,
+                emitter,
+                o -> (StepResult) o,
+                () -> resultWithDifferentNodeId);
+
+        assertThat(captured).hasSize(2);
+        assertThat(captured.get(0).state()).isEqualTo("RUNNING");
+        assertThat(captured.get(0).nodeId()).isEqualTo(NODE_ID);
+        assertThat(captured.get(1).state()).isEqualTo("COMPLETED");
+        assertThat(captured.get(1).nodeId()).isEqualTo(NODE_ID)
+                .as("COMPLETED nodeId must match the nodeId parameter, not result.nodeId()");
+    }
+
+    // --- Finding 3: Error-throwing body ---
+
+    @Test
+    void runWithEmit_bodyThrowsError_emitsFailedAndRethrows() {
+        List<StatusEvent> captured = new ArrayList<>();
+        StatusEmitter emitter = newCapturing(captured);
+        OutOfMemoryError oom = new OutOfMemoryError("simulated OOM");
+
+        assertThatThrownBy(() -> StatusReporting.runWithEmit(
+                        PRESENT_CTX, RUN_ID, NODE_ID,
+                        () -> OCCURRED_AT,
+                        emitter,
+                        EXTRACTOR,
+                        () -> { throw oom; }))
+                .isSameAs(oom);
+
+        assertThat(captured).hasSize(2);
+        assertThat(captured.get(0).state()).isEqualTo("RUNNING");
+        assertThat(captured.get(1).state()).isEqualTo("FAILED");
+    }
 }

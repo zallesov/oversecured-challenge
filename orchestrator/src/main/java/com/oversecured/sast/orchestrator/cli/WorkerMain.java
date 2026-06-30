@@ -14,6 +14,7 @@ import io.temporal.worker.WorkerFactory;
 import io.temporal.worker.WorkerFactoryOptions;
 import io.temporal.worker.WorkerOptions;
 import java.nio.file.Path;
+import java.util.List;
 
 public final class WorkerMain {
 
@@ -30,7 +31,7 @@ public final class WorkerMain {
                         .build());
         WorkflowClient client = WorkflowClient.newInstance(service,
                 WorkflowClientOptions.newBuilder()
-                        .setContextPropagators(java.util.List.of(new CallbackContextPropagator()))
+                        .setContextPropagators(List.of(new CallbackContextPropagator()))
                         .build());
         WorkerFactoryOptions factoryOptions = WorkerFactoryOptions.newBuilder()
                 .setWorkerInterceptors(new StatusEmitInterceptor())

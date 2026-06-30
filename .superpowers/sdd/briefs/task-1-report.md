@@ -114,3 +114,65 @@ No other deviations. Temporal 1.36.0 API matched the brief exactly for `ContextP
 ## Concerns
 
 None. Implementation is complete, compile is clean, 53/53 tests pass.
+
+---
+
+# Review-Findings Fix Report
+
+## Status
+
+DONE — all 55 tests pass (2 new tests added), compile is clean.
+
+## Changes Applied
+
+### 1. `HttpStatusEmitter.java` — bounded total timeout (~3s)
+
+- Removed `connectTimeout(TIMEOUT)` from the `HttpClient` builder so the client-level connect timeout no longer adds independently.
+- Changed `httpClient.send(...)` to `httpClient.sendAsync(...).get(3, TimeUnit.SECONDS)` so the wall-clock limit for the entire emit call (connect + request) is a single 3 s cap.
+- Added `import java.util.concurrent.TimeUnit;`.
+
+### 2. `StatusEvent.java` — nodeId coherence
+
+- `fromResult` signature changed from `(String runId, StepResult result, String occurredAt)` to `(String runId, String nodeId, StepResult result, String occurredAt)`.
+- The new `nodeId` parameter is used in the constructed event instead of `result.nodeId()`, so RUNNING and COMPLETED/FAILED events for the same activity always carry the same identifier.
+
+### 3. `StatusReporting.java` — Throwable handling + nodeId threading
+
+- `fromResult` call updated to pass `nodeId` parameter (finding 2).
+- `catch (Exception e)` widened to `catch (Throwable t)` so OOM/StackOverflow bodies still emit a FAILED event.
+- Rethrow logic: `if (t instanceof Error e) throw e; throw (Exception) t;` — preserves existing checked-exception rethrow semantics, rethrows Errors unwrapped.
+
+### 4. `StatusEmitInterceptor.java` — static extractor constant
+
+- Extracted the per-call lambda to `private static final Function<Object, StepResult> STEP_RESULT_EXTRACTOR`.
+- Added `import java.util.function.Function;`.
+
+### 5. `WorkerMain.java` — clean import
+
+- Added `import java.util.List;`.
+- Replaced `java.util.List.of(...)` inline with `List.of(...)`.
+
+### 6. Tests updated
+
+**`StatusEventTest.java`**: Both `fromResult` call sites updated to pass the `nodeId` parameter in the new position.
+
+**`StatusReportingTest.java`**: Two new tests added:
+
+- `runWithEmit_nodeIdCoherence_runningAndCompletedCarrySameNodeId` — creates a `StepResult` with an internal nodeId different from the `nodeId` parameter; asserts both RUNNING and COMPLETED events carry the parameter's nodeId.
+- `runWithEmit_bodyThrowsError_emitsFailedAndRethrows` — body throws `OutOfMemoryError`; asserts RUNNING then FAILED are emitted and the same Error is rethrown.
+
+## Test Command and Output
+
+```
+./gradlew :orchestrator:test
+```
+
+Output tail:
+```
+> Task :orchestrator:test
+
+BUILD SUCCESSFUL in 5s
+19 actionable tasks: 3 executed, 16 up-to-date
+```
+
+Test counts (from XML results): 55 tests, 0 failures, 0 errors (was 53; +2 new tests).

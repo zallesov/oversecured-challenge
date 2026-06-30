@@ -5,12 +5,23 @@ import io.temporal.common.interceptors.ActivityInboundCallsInterceptor;
 import io.temporal.common.interceptors.ActivityInboundCallsInterceptorBase;
 import io.temporal.common.interceptors.WorkerInterceptorBase;
 
+import java.util.function.Function;
+
 /**
  * Worker interceptor that wraps each activity execution with RUNNING/COMPLETED/FAILED
  * status emission via {@link StatusReporting}. Thin by design — logic lives in
  * {@link StatusReporting} for testability.
  */
 public final class StatusEmitInterceptor extends WorkerInterceptorBase {
+
+    /** Unwraps ActivityOutput → StepResult; returns null if the result is not a StepResult. */
+    private static final Function<Object, StepResult> STEP_RESULT_EXTRACTOR = o -> {
+        if (o instanceof ActivityInboundCallsInterceptor.ActivityOutput ao) {
+            Object result = ao.getResult();
+            return result instanceof StepResult s ? s : null;
+        }
+        return null;
+    };
 
     private final StatusEmitter emitter;
 
@@ -39,21 +50,12 @@ public final class StatusEmitInterceptor extends WorkerInterceptorBase {
                 String nodeId = ActivityNodeIds.nodeIdForActivityType(activityType);
                 String runId = ctx == null ? null : ctx.runId();
 
-                // Extractor: unwrap ActivityOutput → StepResult (returns null if not a StepResult)
-                java.util.function.Function<Object, StepResult> extractor = o -> {
-                    if (o instanceof ActivityOutput ao) {
-                        Object result = ao.getResult();
-                        return result instanceof StepResult s ? s : null;
-                    }
-                    return null;
-                };
-
                 try {
                     return (ActivityOutput) StatusReporting.runWithEmit(
                             ctx, runId, nodeId,
                             () -> java.time.Instant.now().toString(),
                             emitter,
-                            extractor,
+                            STEP_RESULT_EXTRACTOR,
                             () -> super.execute(input));
                 } catch (RuntimeException e) {
                     throw e;
