@@ -91,9 +91,9 @@ const callbackHeaderInterceptor: WorkflowClientInterceptor = {
       ...input,
       headers: {
         ...input.headers,
-        callbackUrl: defaultPayloadConverter.toPayload(cb.url),
-        callbackSecret: defaultPayloadConverter.toPayload(cb.secret),
-        runId: defaultPayloadConverter.toPayload(cb.runId),
+        callbackUrl: defaultPayloadConverter.toPayload(cb.url)!,
+        callbackSecret: defaultPayloadConverter.toPayload(cb.secret)!,
+        runId: defaultPayloadConverter.toPayload(cb.runId)!,
       },
     });
   },
