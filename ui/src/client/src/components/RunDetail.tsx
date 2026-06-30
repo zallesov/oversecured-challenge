@@ -113,38 +113,53 @@ export function RunDetail({ runId, onRunUpdated, onGoToRuns }: RunDetailProps) {
 
       // Subscribe — each subscribe call returns an unsub; handle cancelled-before-resolved
       const runUnsub = api.subscribeRun(runId as string, (updatedRun) => {
+        if (cancelled) return;
         setRun(updatedRun);
         onRunUpdatedRef.current?.(updatedRun);
       });
-      runUnsub.then((fn) => {
-        if (cancelled) {
-          void fn();
-        } else {
-          unsubs.push(fn);
-        }
-      });
+      runUnsub
+        .then((fn) => {
+          if (cancelled) {
+            void fn();
+          } else {
+            unsubs.push(fn);
+          }
+        })
+        .catch((e: unknown) => {
+          if (!cancelled) setError(errorMessage(e));
+        });
 
       const nodesUnsub = api.subscribeNodes(runId as string, (action, node) => {
+        if (cancelled) return;
         setNodes((prev) => upsertById(prev, node, action));
       });
-      nodesUnsub.then((fn) => {
-        if (cancelled) {
-          void fn();
-        } else {
-          unsubs.push(fn);
-        }
-      });
+      nodesUnsub
+        .then((fn) => {
+          if (cancelled) {
+            void fn();
+          } else {
+            unsubs.push(fn);
+          }
+        })
+        .catch((e: unknown) => {
+          if (!cancelled) setError(errorMessage(e));
+        });
 
       const findingsUnsub = api.subscribeFindings(runId as string, (action, finding) => {
+        if (cancelled) return;
         setFindings((prev) => upsertById(prev, finding, action));
       });
-      findingsUnsub.then((fn) => {
-        if (cancelled) {
-          void fn();
-        } else {
-          unsubs.push(fn);
-        }
-      });
+      findingsUnsub
+        .then((fn) => {
+          if (cancelled) {
+            void fn();
+          } else {
+            unsubs.push(fn);
+          }
+        })
+        .catch((e: unknown) => {
+          if (!cancelled) setError(errorMessage(e));
+        });
     }
 
     void init();

@@ -261,6 +261,7 @@ export default function App() {
 
     api
       .subscribeRuns((action, run) => {
+        if (cancelled) return;
         setRuns((prev) => {
           const next = upsertById(prev, run, action);
           // Keep newest-first (matches listRuns sort: -created)
@@ -279,6 +280,9 @@ export default function App() {
         } else {
           unsub = fn;
         }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(messageFor(e));
       });
 
     return () => {
