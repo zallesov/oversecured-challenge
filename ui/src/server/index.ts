@@ -9,8 +9,9 @@ import express, {
   type Response,
 } from "express";
 
+import internalRoutes from "./routes/internal.js";
 import runRoutes from "./routes/runs.js";
-import { startStatusSync } from "./services/status-sync.js";
+import { startRunReconcile } from "./services/status-sync.js";
 
 export const app = express();
 
@@ -21,6 +22,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use(runRoutes);
+app.use(internalRoutes);
 
 if (process.env.NODE_ENV === "production") {
   const clientDir = path.resolve(process.cwd(), "dist/client");
@@ -49,7 +51,7 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
 app.use(errorHandler);
 
 export async function startServer(): Promise<void> {
-  startStatusSync(Number(process.env.STATUS_SYNC_INTERVAL_MS ?? 5000));
+  startRunReconcile(Number(process.env.RUN_RECONCILE_INTERVAL_MS ?? 60000));
 
   const port = Number(process.env.PORT ?? 3000);
   app.listen(port, () => {

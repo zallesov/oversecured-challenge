@@ -1,306 +1,320 @@
-import type { PoolClient } from "pg";
-import { randomUUID } from "node:crypto";
+import type { RecordModel } from "pocketbase";
 
-import { query, transaction } from "../db.js";
-import {
-  buildAnalysisPlan,
-  queryRunStatus,
-  type WorkflowNodeStatus,
-  type WorkflowRunStatus,
-} from "../temporal.js";
+import { adminPb } from "../pb.js";
+import { queryRunStatus } from "../temporal.js";
 import {
   extractFindingLocation,
   readFindingsDoc,
   type FindingJson,
 } from "./artifacts.js";
 
-type ActiveRunRow = {
-  id: string;
-  workflow_id: string;
+export type StatusEventState = "RUNNING" | "COMPLETED" | "FAILED";
+
+// Node-status event POSTed by the worker interceptor. Matches the Java StatusEvent wire contract.
+export type StatusEvent = {
+  runId: string;
+  nodeId: string;
+  state: StatusEventState;
+  message?: string | null;
+  occurredAt?: string | null;
+  metrics?: Record<string, unknown>;
+  findingsKeys?: string[];
+  findingCount?: number;
+  severityCounts?: Record<string, number>;
+  error?: { kind?: string; message?: string } | null;
 };
 
-function json(value: unknown): string {
-  return JSON.stringify(value ?? null);
-}
-
-function textOrDefault(value: string | undefined | null, fallback: string): string {
-  return value && value.length > 0 ? value : fallback;
-}
+// Mirrors AnalyzeApkWorkflowImpl.nodeDefinitions(); the event carries no label/kind.
+const NODE_DEFS: Record<string, { label: string; kind: string }> = {
+  decompile: { label: "Decompile", kind: "preparation" },
+  parse: { label: "Parse Sources", kind: "preparation" },
+  "manifest-facts": { label: "Manifest Facts", kind: "preparation" },
+  taint: { label: "Taint Analysis", kind: "analyzer" },
+  "manifest-misconfig": { label: "Manifest Misconfiguration", kind: "analyzer" },
+  report: { label: "Report", kind: "report" },
+  "ai-triage": { label: "AI Triage", kind: "report" },
+};
+const PIPELINE_NODE_IDS = Object.keys(NODE_DEFS);
+// ai-triage is a soft step: its failure never fails the run.
+const HARD_NODE_IDS = [
+  "decompile",
+  "parse",
+  "manifest-facts",
+  "taint",
+  "manifest-misconfig",
+  "report",
+];
 
 function findingText(
   finding: FindingJson,
-  key: "ruleId" | "vulnerabilityClass" | "severity" | "message" | "cwe" | "owaspMobile",
+  key: string,
   fallback = "",
 ): string {
   const value = finding[key];
   return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
-async function upsertRunStatus(
-  client: PoolClient,
-  runId: string,
-  status: WorkflowRunStatus,
-): Promise<void> {
-  const report = buildAnalysisPlan(runId).report;
-
-  await client.query(
-    `
-      UPDATE runs
-      SET status = $2,
-          message = $3,
-          started_at = $4,
-          finished_at = $5,
-          duration_ms = $6,
-          report_html_key = COALESCE(report_html_key, $7),
-          report_sarif_key = COALESCE(report_sarif_key, $8),
-          updated_at = now()
-      WHERE id = $1
-    `,
-    [
-      runId,
-      status.state,
-      status.message,
-      status.startedAt,
-      status.finishedAt,
-      status.durationMs,
-      report.htmlKey,
-      report.sarifKey,
-    ],
-  );
+function isTerminal(state: StatusEventState): boolean {
+  return state === "COMPLETED" || state === "FAILED";
 }
 
-async function upsertNodeStatus(
-  client: PoolClient,
-  runId: string,
-  node: WorkflowNodeStatus,
-): Promise<void> {
-  await client.query(
-    `
-      INSERT INTO run_nodes (
-        run_id,
-        node_id,
-        label,
-        kind,
-        state,
-        message,
-        queued_at,
-        started_at,
-        finished_at,
-        duration_ms,
-        finding_count,
-        severity_counts,
-        metrics,
-        diagnostics,
-        artifacts,
-        error,
-        findings_keys,
-        updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, now())
-      ON CONFLICT (run_id, node_id)
-      DO UPDATE SET
-        label = EXCLUDED.label,
-        kind = EXCLUDED.kind,
-        state = EXCLUDED.state,
-        message = EXCLUDED.message,
-        queued_at = EXCLUDED.queued_at,
-        started_at = EXCLUDED.started_at,
-        finished_at = EXCLUDED.finished_at,
-        duration_ms = EXCLUDED.duration_ms,
-        finding_count = EXCLUDED.finding_count,
-        severity_counts = EXCLUDED.severity_counts,
-        metrics = EXCLUDED.metrics,
-        diagnostics = EXCLUDED.diagnostics,
-        artifacts = EXCLUDED.artifacts,
-        error = EXCLUDED.error,
-        findings_keys = EXCLUDED.findings_keys,
-        updated_at = now()
-    `,
-    [
-      runId,
-      node.id,
-      node.label,
-      node.kind,
-      node.state,
-      node.message,
-      node.queuedAt,
-      node.startedAt,
-      node.finishedAt,
-      node.durationMs,
-      node.findingCount ?? 0,
-      json(node.severityCounts ?? {}),
-      json(node.metrics ?? {}),
-      json(node.diagnostics ?? []),
-      json(node.artifacts ?? []),
-      node.error ? json(node.error) : null,
-      json(node.findingsKeys ?? []),
-    ],
-  );
+function timestamps(values: unknown[]): number[] {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((value) => Date.parse(value))
+    .filter((value) => !Number.isNaN(value));
 }
 
-async function hasIngestedFindings(
-  client: PoolClient,
-  runId: string,
-  nodeId: string,
-): Promise<boolean> {
-  const result = await client.query(
-    "SELECT findings_ingested FROM run_nodes WHERE run_id = $1 AND node_id = $2",
-    [runId, nodeId],
-  );
-  return result.rows[0]?.findings_ingested === true;
+async function listNodes(
+  pb: Awaited<ReturnType<typeof adminPb>>,
+  runRecordId: string,
+): Promise<RecordModel[]> {
+  return pb.collection("run_nodes").getFullList({
+    filter: pb.filter("run = {:run}", { run: runRecordId }),
+  });
 }
 
-async function insertFinding(
-  client: PoolClient,
-  runId: string,
-  nodeId: string,
-  analyzer: string,
-  finding: FindingJson,
+/** Apply one worker status event: upsert the node, derive run status, ingest findings. */
+export async function applyStatusEvent(
+  runRecordId: string,
+  event: StatusEvent,
 ): Promise<void> {
-  const location = extractFindingLocation(finding);
+  const pb = await adminPb();
+  const occurredAt = event.occurredAt || new Date().toISOString();
 
-  await client.query(
-    `
-      INSERT INTO findings (
-        id,
-        run_id,
-        node_id,
-        analyzer,
-        rule_id,
-        vulnerability_class,
-        severity,
-        message,
-        cwe,
-        owasp_mobile,
-        source_file,
-        source_line,
-        sink_file,
-        sink_line,
-        raw_json
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
-    `,
-    [
-      randomUUID(),
-      runId,
-      nodeId,
-      analyzer,
-      findingText(finding, "ruleId", "unknown"),
-      findingText(finding, "vulnerabilityClass", "unknown"),
-      findingText(finding, "severity", "UNKNOWN"),
-      findingText(finding, "message", "No message"),
-      findingText(finding, "cwe") || null,
-      findingText(finding, "owaspMobile") || null,
-      location.sourceFile,
-      location.sourceLine,
-      location.sinkFile,
-      location.sinkLine,
-      json(finding),
-    ],
+  const nodes = await listNodes(pb, runRecordId);
+  const byNodeId = new Map<string, RecordModel>(
+    nodes.map((node) => [node.nodeId as string, node]),
   );
+
+  // Ensure the full pipeline exists so the graph is complete even before each node starts.
+  for (const nodeId of PIPELINE_NODE_IDS) {
+    if (!byNodeId.has(nodeId)) {
+      const def = NODE_DEFS[nodeId];
+      const created = await pb.collection("run_nodes").create({
+        run: runRecordId,
+        nodeId,
+        label: def.label,
+        kind: def.kind,
+        state: "QUEUED",
+        message: "",
+        findingCount: 0,
+        severityCounts: {},
+        metrics: {},
+        findingsKeys: [],
+        error: null,
+        findingsIngested: false,
+      });
+      byNodeId.set(nodeId, created);
+    }
+  }
+
+  const def = NODE_DEFS[event.nodeId] ?? {
+    label: event.nodeId,
+    kind: "analyzer",
+  };
+  const target = byNodeId.get(event.nodeId)!;
+
+  const prevQueued = (target.queuedAt as string) || "";
+  const prevStarted = (target.startedAt as string) || "";
+  const queuedAt = prevQueued || occurredAt;
+  const startedAt =
+    prevStarted ||
+    (event.state === "RUNNING" || isTerminal(event.state) ? occurredAt : "");
+  const finishedAt = isTerminal(event.state)
+    ? occurredAt
+    : (target.finishedAt as string) || "";
+  const durationMs =
+    startedAt && finishedAt
+      ? Date.parse(finishedAt) - Date.parse(startedAt)
+      : null;
+
+  const nodeFields = {
+    run: runRecordId,
+    nodeId: event.nodeId,
+    label: def.label,
+    kind: def.kind,
+    state: event.state,
+    message: event.message ?? "",
+    queuedAt,
+    startedAt,
+    finishedAt,
+    durationMs,
+    findingCount: event.findingCount ?? 0,
+    severityCounts: event.severityCounts ?? {},
+    metrics: event.metrics ?? {},
+    findingsKeys: event.findingsKeys ?? [],
+    error: event.error ?? null,
+  };
+
+  const updatedNode = await pb
+    .collection("run_nodes")
+    .update(target.id, nodeFields);
+  byNodeId.set(event.nodeId, updatedNode);
+
+  await updateRunStatus(pb, runRecordId, event, byNodeId, occurredAt);
+  await ingestFindings(pb, runRecordId, event, updatedNode);
 }
 
-async function ingestFindingsForNode(
-  client: PoolClient,
-  runId: string,
-  node: WorkflowNodeStatus,
+async function updateRunStatus(
+  pb: Awaited<ReturnType<typeof adminPb>>,
+  runRecordId: string,
+  event: StatusEvent,
+  byNodeId: Map<string, RecordModel>,
+  occurredAt: string,
 ): Promise<void> {
-  // Ingest findings from any node that exposes a findings key (taint/misconfig analyzers and the
-  // ai-triage step, which lives in the "report" lane). Nodes without findings keys are skipped.
+  const stateOf = (nodeId: string): string =>
+    (byNodeId.get(nodeId)?.state as string) ?? "QUEUED";
+
+  const hardFailed = HARD_NODE_IDS.find((id) => stateOf(id) === "FAILED");
+  let status: string;
+  let message: string;
+
+  if (hardFailed) {
+    status = "FAILED";
+    message = `Analysis failed at ${hardFailed}.`;
+  } else if (
+    stateOf("report") === "COMPLETED" &&
+    (stateOf("ai-triage") === "COMPLETED" || stateOf("ai-triage") === "FAILED")
+  ) {
+    status = "COMPLETED";
+    message = "Analysis complete.";
+  } else {
+    const anyStarted = PIPELINE_NODE_IDS.some((id) => stateOf(id) !== "QUEUED");
+    status = anyStarted ? "RUNNING" : "QUEUED";
+    message = `Running ${event.nodeId}.`;
+  }
+
+  const allNodes = [...byNodeId.values()];
+  const starts = timestamps(allNodes.map((n) => n.startedAt));
+  const runStartedAt = starts.length
+    ? new Date(Math.min(...starts)).toISOString()
+    : "";
+
+  let runFinishedAt = "";
+  let durationMs: number | null = null;
+  if (status === "COMPLETED" || status === "FAILED") {
+    const finishes = timestamps(allNodes.map((n) => n.finishedAt));
+    runFinishedAt = finishes.length
+      ? new Date(Math.max(...finishes)).toISOString()
+      : occurredAt;
+    if (runStartedAt) {
+      durationMs = Date.parse(runFinishedAt) - Date.parse(runStartedAt);
+    }
+  }
+
+  await pb.collection("runs").update(runRecordId, {
+    status,
+    message,
+    startedAt: runStartedAt,
+    finishedAt: runFinishedAt,
+    durationMs,
+  });
+}
+
+async function ingestFindings(
+  pb: Awaited<ReturnType<typeof adminPb>>,
+  runRecordId: string,
+  event: StatusEvent,
+  node: RecordModel,
+): Promise<void> {
   if (
-    node.state !== "COMPLETED" ||
-    !Array.isArray(node.findingsKeys) ||
-    node.findingsKeys.length === 0 ||
-    node.findingCount === 0
+    event.state !== "COMPLETED" ||
+    !event.findingsKeys ||
+    event.findingsKeys.length === 0 ||
+    (event.findingCount ?? 0) === 0 ||
+    node.findingsIngested === true
   ) {
     return;
   }
 
-  if (await hasIngestedFindings(client, runId, node.id)) {
-    return;
-  }
-
-  for (const findingsKey of node.findingsKeys) {
-    const doc = await readFindingsDoc(findingsKey);
-    for (const finding of doc.findings) {
-      await insertFinding(client, runId, node.id, doc.analyzer, finding);
+  try {
+    for (const key of event.findingsKeys) {
+      const doc = await readFindingsDoc(key);
+      for (const finding of doc.findings) {
+        const location = extractFindingLocation(finding);
+        await pb.collection("findings").create({
+          run: runRecordId,
+          nodeId: event.nodeId,
+          analyzer: doc.analyzer,
+          ruleId: findingText(finding, "ruleId", "unknown"),
+          vulnerabilityClass: findingText(finding, "vulnerabilityClass", "unknown"),
+          severity: findingText(finding, "severity", "UNKNOWN"),
+          message: findingText(finding, "message", "No message"),
+          cwe: findingText(finding, "cwe") || null,
+          owaspMobile: findingText(finding, "owaspMobile") || null,
+          sourceFile: location.sourceFile,
+          sourceLine: location.sourceLine,
+          sinkFile: location.sinkFile,
+          sinkLine: location.sinkLine,
+          rawJson: finding,
+        });
+      }
     }
-  }
-
-  await client.query(
-    `
-      UPDATE run_nodes
-      SET findings_ingested = true,
-          updated_at = now()
-      WHERE run_id = $1 AND node_id = $2
-    `,
-    [runId, node.id],
-  );
-}
-
-async function syncRun(run: ActiveRunRow): Promise<void> {
-  const status = await queryRunStatus(run.workflow_id);
-
-  await transaction(async (client) => {
-    await upsertRunStatus(client, run.id, status);
-    for (const node of status.nodes ?? []) {
-      await upsertNodeStatus(client, run.id, node);
-    }
-  });
-
-  for (const node of status.nodes ?? []) {
-    try {
-      await transaction(async (client) => {
-        await ingestFindingsForNode(client, run.id, node);
-      });
-    } catch (error) {
-      console.error(
-        `Failed to ingest findings for run ${run.id} node ${node.id}:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
+    await pb.collection("run_nodes").update(node.id, { findingsIngested: true });
+  } catch (error) {
+    console.error(
+      `Failed to ingest findings for run ${runRecordId} node ${event.nodeId}:`,
+      error instanceof Error ? error.message : error,
+    );
   }
 }
 
-export async function syncActiveRuns(): Promise<void> {
-  const activeRuns = await query<ActiveRunRow>(
-    "SELECT id, workflow_id FROM runs WHERE status IN ('QUEUED', 'RUNNING') ORDER BY created_at ASC",
-  );
-
-  for (const run of activeRuns.rows) {
-    try {
-      await syncRun(run);
-    } catch (error) {
-      console.error(
-        `Failed to sync run ${run.id} (${run.workflow_id}):`,
-        error instanceof Error ? error.message : error,
-      );
-    }
-  }
-}
-
-export function startStatusSync(intervalMs: number): { stop: () => void } {
+/**
+ * Safety-net sweep (NOT a poll loop): for runs stuck RUNNING past a TTL with no recent event, do a
+ * single Temporal reconcile to recover lost best-effort emits or infra-level workflow death.
+ */
+export function startRunReconcile(intervalMs: number): { stop: () => void } {
   let running = false;
 
-  const tick = (): void => {
+  const tick = async (): Promise<void> => {
     if (running) {
       return;
     }
     running = true;
-    syncActiveRuns()
-      .catch((error) => {
-        console.error(
-          "Status sync failed:",
-          error instanceof Error ? error.message : error,
-        );
-      })
-      .finally(() => {
-        running = false;
+    try {
+      const pb = await adminPb();
+      const staleMs = Number(process.env.RUN_STALE_MS ?? 600000);
+      const cutoff = new Date(Date.now() - staleMs);
+      const stale = await pb.collection("runs").getList(1, 20, {
+        filter: pb.filter("status = {:status} && updated < {:cutoff}", {
+          status: "RUNNING",
+          cutoff,
+        }),
       });
+
+      for (const run of stale.items) {
+        try {
+          const status = await queryRunStatus(run.workflowId as string);
+          if (status.state === "COMPLETED" || status.state === "FAILED") {
+            await pb.collection("runs").update(run.id, {
+              status: status.state,
+              message: status.message,
+              finishedAt: status.finishedAt ?? "",
+              durationMs: status.durationMs ?? null,
+            });
+          }
+        } catch (error) {
+          console.error(
+            `Run reconcile failed for ${run.id} (${run.workflowId as string}):`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+    } catch (error) {
+      console.error(
+        "Run reconcile sweep failed:",
+        error instanceof Error ? error.message : error,
+      );
+    } finally {
+      running = false;
+    }
   };
 
-  tick();
-  const interval = setInterval(tick, intervalMs);
+  void tick();
+  const interval = setInterval(() => {
+    void tick();
+  }, intervalMs);
   return {
     stop: () => clearInterval(interval),
   };
