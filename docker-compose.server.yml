@@ -1,6 +1,6 @@
 # Server stack for the Android SAST system. Self-contained; coexists with other stacks on
 # the host. All published host ports are offset into 18xxx and the compose project is isolated
-# by name (`-p oversecured`). Temporal gRPC and both Postgres DBs are internal only.
+# by name (`-p oversecured`). Temporal gRPC is internal only.
 #
 #   docker compose -f docker-compose.server.yml -p oversecured --env-file .env.server up -d
 #
@@ -47,34 +47,44 @@ services:
     ports:
       - "${TEMPORAL_UI_PORT:-18080}:8080"
 
-  ui-postgres:
-    image: postgres:16
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:0.28.4
     restart: unless-stopped
+    command: ["serve", "--migrationsDir", "/pb_migrations"]
     environment:
-      POSTGRES_USER: ${UI_DB_USER:-ui}
-      POSTGRES_PASSWORD: ${UI_DB_PASSWORD:-ui}
-      POSTGRES_DB: ${UI_DB_NAME:-ui}
+      PB_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL:?set POCKETBASE_ADMIN_EMAIL in .env.server}
+      PB_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD:?set POCKETBASE_ADMIN_PASSWORD in .env.server}
+    ports:
+      - "${POCKETBASE_PORT:-18090}:8090"
     volumes:
-      - ui-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${UI_DB_USER:-ui}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      - pb-data:/pb_data
+      - ./ui/pb_migrations:/pb_migrations:ro
 
   ui:
     image: oversecured-ui:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: ui/Dockerfile
+      args:
+        # Browser-reachable PB URL baked into the client bundle at build time.
+        # Set to the public host:port (or reverse-proxy path) of the PocketBase service.
+        VITE_POCKETBASE_URL: ${VITE_POCKETBASE_URL:-http://localhost:18090}
     restart: unless-stopped
     depends_on:
       temporal:
         condition: service_started
-      ui-postgres:
-        condition: service_healthy
+      pocketbase:
+        condition: service_started
     environment:
-      DATABASE_URL: postgres://${UI_DB_USER:-ui}:${UI_DB_PASSWORD:-ui}@ui-postgres:5432/${UI_DB_NAME:-ui}
+      # Server-to-PB (internal network)
+      POCKETBASE_URL: http://pocketbase:8090
+      # Superuser credentials — must match PB_ADMIN_* in the pocketbase service
+      POCKETBASE_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL:?set POCKETBASE_ADMIN_EMAIL in .env.server}
+      POCKETBASE_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD:?set POCKETBASE_ADMIN_PASSWORD in .env.server}
+      # Base URL the backend advertises to the worker for status callbacks
+      INTERNAL_BASE_URL: http://ui:3000
+      # Shared secret for validating inbound status callbacks from the worker
+      STATUS_CALLBACK_SECRET: ${STATUS_CALLBACK_SECRET:?set STATUS_CALLBACK_SECRET in .env.server}
       TEMPORAL_ADDRESS: temporal:7233
       ARTIFACT_ROOT: /workspace/artifacts
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.server}
@@ -111,5 +121,5 @@ services:
 
 volumes:
   temporal-postgres:
-  ui-postgres:
+  pb-data:
   artifacts:
