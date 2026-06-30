@@ -3,11 +3,15 @@ package com.oversecured.sast.orchestrator.cli;
 import com.oversecured.sast.orchestrator.TaskQueues;
 import com.oversecured.sast.orchestrator.activities.PipelineActivitiesImpl;
 import com.oversecured.sast.orchestrator.workflow.AnalyzeApkWorkflowImpl;
+import com.oversecured.sast.orchestrator.workflow.CallbackContextPropagator;
+import com.oversecured.sast.orchestrator.workflow.StatusEmitInterceptor;
 import io.temporal.client.WorkflowClient;
+import io.temporal.client.WorkflowClientOptions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import io.temporal.worker.Worker;
 import io.temporal.worker.WorkerFactory;
+import io.temporal.worker.WorkerFactoryOptions;
 import io.temporal.worker.WorkerOptions;
 import java.nio.file.Path;
 
@@ -24,8 +28,14 @@ public final class WorkerMain {
                 WorkflowServiceStubsOptions.newBuilder()
                         .setTarget(temporalTarget)
                         .build());
-        WorkflowClient client = WorkflowClient.newInstance(service);
-        WorkerFactory factory = WorkerFactory.newInstance(client);
+        WorkflowClient client = WorkflowClient.newInstance(service,
+                WorkflowClientOptions.newBuilder()
+                        .setContextPropagators(java.util.List.of(new CallbackContextPropagator()))
+                        .build());
+        WorkerFactoryOptions factoryOptions = WorkerFactoryOptions.newBuilder()
+                .setWorkerInterceptors(new StatusEmitInterceptor())
+                .build();
+        WorkerFactory factory = WorkerFactory.newInstance(client, factoryOptions);
         // Cap concurrent activities: each taint/parse activity re-parses the decompiled tree with an
         // android.jar solver (memory-heavy). Bounding peak parallelism keeps the worker off the OOM
         // line; tune with MAX_CONCURRENT_ACTIVITIES.
