@@ -7,7 +7,7 @@ import {
   useRef,
   useState
 } from 'react';
-import { api, ApiError, clearToken, getToken, setToken, type Run, type User } from './api';
+import { api, ApiError, clearToken, getToken, setToken, upsertById, type Run, type User } from './api';
 import { RunDetail } from './components/RunDetail';
 import { RunList } from './components/RunList';
 
@@ -249,6 +249,45 @@ export default function App() {
       void loadRuns();
     }
   }, [loadRuns, user]);
+
+  // Live runs subscription — opens after initial load, closed on logout/unmount
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let cancelled = false;
+    let unsub: (() => Promise<void>) | null = null;
+
+    api
+      .subscribeRuns((action, run) => {
+        setRuns((prev) => {
+          const next = upsertById(prev, run, action);
+          // Keep newest-first (matches listRuns sort: -created)
+          return action === 'delete'
+            ? next
+            : [...next].sort((a, b) => {
+                const ta = a.createdAt ?? '';
+                const tb = b.createdAt ?? '';
+                return tb < ta ? -1 : tb > ta ? 1 : 0;
+              });
+        });
+      })
+      .then((fn) => {
+        if (cancelled) {
+          void fn();
+        } else {
+          unsub = fn;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (unsub) {
+        void unsub();
+      }
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!user) {

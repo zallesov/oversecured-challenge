@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import PocketBase from 'pocketbase';
-import type { RecordModel } from 'pocketbase';
+import type { RecordModel, UnsubscribeFunc } from 'pocketbase';
 
 // ---------------------------------------------------------------------------
 // Shared PocketBase client — exported so Task 7 can attach realtime listeners
@@ -215,6 +215,22 @@ function toFinding(record: RecordModel): Finding {
 }
 
 // ---------------------------------------------------------------------------
+// Shared upsert helper — replace-or-append by id on create/update, remove on delete
+// ---------------------------------------------------------------------------
+export function upsertById<T extends { id: string }>(list: T[], item: T, action: string): T[] {
+  if (action === 'delete') {
+    return list.filter((el) => el.id !== item.id);
+  }
+  const idx = list.findIndex((el) => el.id === item.id);
+  if (idx >= 0) {
+    const next = [...list];
+    next[idx] = item;
+    return next;
+  }
+  return [...list, item];
+}
+
+// ---------------------------------------------------------------------------
 // API surface (same exported names and signatures as before)
 // ---------------------------------------------------------------------------
 export const api = {
@@ -282,6 +298,29 @@ export const api = {
       sort: 'created',
     });
     return records.map(toFinding);
+  },
+
+  // -------------------------------------------------------------------------
+  // Realtime subscription helpers
+  // -------------------------------------------------------------------------
+  async subscribeRun(id: string, cb: (run: Run) => void): Promise<UnsubscribeFunc> {
+    return pb.collection('runs').subscribe(id, (e) => cb(toRun(e.record)));
+  },
+
+  async subscribeNodes(id: string, cb: (action: string, node: RunNode) => void): Promise<UnsubscribeFunc> {
+    return pb.collection('run_nodes').subscribe('*', (e) => cb(e.action, toNode(e.record)), {
+      filter: pb.filter('run = {:r}', { r: id }),
+    });
+  },
+
+  async subscribeFindings(id: string, cb: (action: string, finding: Finding) => void): Promise<UnsubscribeFunc> {
+    return pb.collection('findings').subscribe('*', (e) => cb(e.action, toFinding(e.record)), {
+      filter: pb.filter('run = {:r}', { r: id }),
+    });
+  },
+
+  async subscribeRuns(cb: (action: string, run: Run) => void): Promise<UnsubscribeFunc> {
+    return pb.collection('runs').subscribe('*', (e) => cb(e.action, toRun(e.record)));
   },
 
   /** Download a report — still goes to the backend REST API. */

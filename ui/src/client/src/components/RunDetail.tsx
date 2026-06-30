@@ -1,6 +1,6 @@
 import { ArrowLeft, Download, ExternalLink, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, type Finding, type Run, type RunNode } from '../api';
+import { api, ApiError, upsertById, type Finding, type Run, type RunNode } from '../api';
 import { FindingTable } from './FindingTable';
 import { PipelineGraph } from './PipelineGraph';
 
@@ -9,10 +9,6 @@ type RunDetailProps = {
   onRunUpdated?: (run: Run) => void;
   onGoToRuns?: () => void;
 };
-
-function isActive(status?: string): boolean {
-  return status === 'QUEUED' || status === 'RUNNING';
-}
 
 function formatDuration(durationMs?: number | null): string {
   if (durationMs == null) {
@@ -45,6 +41,8 @@ export function RunDetail({ runId, onRunUpdated, onGoToRuns }: RunDetailProps) {
   const [error, setError] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState<'html' | 'sarif' | 'ai-triage' | null>(null);
   const refreshInFlight = useRef(false);
+  const onRunUpdatedRef = useRef(onRunUpdated);
+  onRunUpdatedRef.current = onRunUpdated;
 
   const refresh = useCallback(async () => {
     if (!runId) {
@@ -57,20 +55,21 @@ export function RunDetail({ runId, onRunUpdated, onGoToRuns }: RunDetailProps) {
     refreshInFlight.current = true;
     setError(null);
     try {
-      const [nextRun, nextNodes] = await Promise.all([api.getRun(runId), api.getRunNodes(runId)]);
+      const [nextRun, nextNodes, nextFindings] = await Promise.all([
+        api.getRun(runId),
+        api.getRunNodes(runId),
+        api.getRunFindings(runId),
+      ]);
       setRun(nextRun);
       setNodes(nextNodes);
-      onRunUpdated?.(nextRun);
-
-      if (!isActive(nextRun.status)) {
-        const nextFindings = await api.getRunFindings(runId);
-        setFindings(nextFindings);
-      }
+      setFindings(nextFindings);
+      onRunUpdatedRef.current?.(nextRun);
     } finally {
       refreshInFlight.current = false;
     }
-  }, [onRunUpdated, runId]);
+  }, [runId]);
 
+  // Snapshot + realtime subscriptions
   useEffect(() => {
     if (!runId) {
       setRun(null);
@@ -80,43 +79,83 @@ export function RunDetail({ runId, onRunUpdated, onGoToRuns }: RunDetailProps) {
     }
 
     let cancelled = false;
+
+    // Pending unsubscribe functions — called on cleanup even if subscribe resolves after unmount
+    const unsubs: Array<() => Promise<void>> = [];
+
     setLoading(true);
-    refresh()
-      .catch((nextError: unknown) => {
+    setError(null);
+
+    async function init() {
+      try {
+        // Snapshot
+        const [nextRun, nextNodes, nextFindings] = await Promise.all([
+          api.getRun(runId as string),
+          api.getRunNodes(runId as string),
+          api.getRunFindings(runId as string),
+        ]);
+        if (cancelled) return;
+        setRun(nextRun);
+        setNodes(nextNodes);
+        setFindings(nextFindings);
+        onRunUpdatedRef.current?.(nextRun);
+      } catch (nextError: unknown) {
         if (!cancelled) {
           setError(errorMessage(nextError));
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) {
           setLoading(false);
         }
+      }
+
+      if (cancelled) return;
+
+      // Subscribe — each subscribe call returns an unsub; handle cancelled-before-resolved
+      const runUnsub = api.subscribeRun(runId as string, (updatedRun) => {
+        setRun(updatedRun);
+        onRunUpdatedRef.current?.(updatedRun);
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [refresh, runId]);
-
-  useEffect(() => {
-    if (!runId || !isActive(run?.status)) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    const interval = window.setInterval(() => {
-      refresh().catch((nextError: unknown) => {
-        if (!cancelled) {
-          setError(errorMessage(nextError));
+      runUnsub.then((fn) => {
+        if (cancelled) {
+          void fn();
+        } else {
+          unsubs.push(fn);
         }
       });
-    }, 4000);
+
+      const nodesUnsub = api.subscribeNodes(runId as string, (action, node) => {
+        setNodes((prev) => upsertById(prev, node, action));
+      });
+      nodesUnsub.then((fn) => {
+        if (cancelled) {
+          void fn();
+        } else {
+          unsubs.push(fn);
+        }
+      });
+
+      const findingsUnsub = api.subscribeFindings(runId as string, (action, finding) => {
+        setFindings((prev) => upsertById(prev, finding, action));
+      });
+      findingsUnsub.then((fn) => {
+        if (cancelled) {
+          void fn();
+        } else {
+          unsubs.push(fn);
+        }
+      });
+    }
+
+    void init();
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      for (const fn of unsubs) {
+        void fn();
+      }
     };
-  }, [refresh, run?.status, runId]);
+  }, [runId]);
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
