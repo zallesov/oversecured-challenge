@@ -1,7 +1,7 @@
 import type { RecordModel } from "pocketbase";
 
 import { adminPb } from "../pb.js";
-import { queryRunStatus } from "../temporal.js";
+import { queryRunStatus, type WorkflowNodeStatus } from "../temporal.js";
 import {
   extractFindingLocation,
   readFindingsDoc,
@@ -24,6 +24,14 @@ export type StatusEvent = {
   error?: { kind?: string; message?: string } | null;
 };
 
+type FindingTextKey =
+  | "ruleId"
+  | "vulnerabilityClass"
+  | "severity"
+  | "message"
+  | "cwe"
+  | "owaspMobile";
+
 // Mirrors AnalyzeApkWorkflowImpl.nodeDefinitions(); the event carries no label/kind.
 const NODE_DEFS: Record<string, { label: string; kind: string }> = {
   decompile: { label: "Decompile", kind: "preparation" },
@@ -45,9 +53,25 @@ const HARD_NODE_IDS = [
   "report",
 ];
 
+// Serialize event application per run so concurrent events for the same run cannot interleave (avoids
+// duplicate findings ingestion and lost node updates). Single-process only.
+const runChains = new Map<string, Promise<unknown>>();
+
+function withRunLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = (runChains.get(key) ?? Promise.resolve()).catch(() => undefined);
+  const run = prev.then(fn);
+  const tail = run.catch(() => undefined).finally(() => {
+    if (runChains.get(key) === tail) {
+      runChains.delete(key);
+    }
+  });
+  runChains.set(key, tail);
+  return run;
+}
+
 function findingText(
   finding: FindingJson,
-  key: string,
+  key: FindingTextKey,
   fallback = "",
 ): string {
   const value = finding[key];
@@ -75,7 +99,14 @@ async function listNodes(
 }
 
 /** Apply one worker status event: upsert the node, derive run status, ingest findings. */
-export async function applyStatusEvent(
+export function applyStatusEvent(
+  runRecordId: string,
+  event: StatusEvent,
+): Promise<void> {
+  return withRunLock(runRecordId, () => applyStatusEventInner(runRecordId, event));
+}
+
+async function applyStatusEventInner(
   runRecordId: string,
   event: StatusEvent,
 ): Promise<void> {
@@ -113,17 +144,40 @@ export async function applyStatusEvent(
     label: event.nodeId,
     kind: "analyzer",
   };
-  const target = byNodeId.get(event.nodeId)!;
+  // An unknown nodeId is not part of the pipeline and was never seeded; create it so we never crash
+  // on a malformed/future event.
+  const existing = byNodeId.get(event.nodeId);
+  const target: RecordModel =
+    existing ??
+    (await pb.collection("run_nodes").create({
+      run: runRecordId,
+      nodeId: event.nodeId,
+      label: def.label,
+      kind: def.kind,
+      state: "QUEUED",
+      message: "",
+      findingCount: 0,
+      severityCounts: {},
+      metrics: {},
+      findingsKeys: [],
+      error: null,
+      findingsIngested: false,
+    }));
+  if (!existing) {
+    byNodeId.set(event.nodeId, target);
+  }
 
   const prevQueued = (target.queuedAt as string) || "";
   const prevStarted = (target.startedAt as string) || "";
+  const prevFinished = (target.finishedAt as string) || "";
   const queuedAt = prevQueued || occurredAt;
   const startedAt =
     prevStarted ||
     (event.state === "RUNNING" || isTerminal(event.state) ? occurredAt : "");
+  // First-set only (mirrors startedAt): a retried terminal event must not advance finishedAt/durationMs.
   const finishedAt = isTerminal(event.state)
-    ? occurredAt
-    : (target.finishedAt as string) || "";
+    ? prevFinished || occurredAt
+    : prevFinished;
   const durationMs =
     startedAt && finishedAt
       ? Date.parse(finishedAt) - Date.parse(startedAt)
@@ -182,7 +236,7 @@ async function updateRunStatus(
   } else {
     const anyStarted = PIPELINE_NODE_IDS.some((id) => stateOf(id) !== "QUEUED");
     status = anyStarted ? "RUNNING" : "QUEUED";
-    message = `Running ${event.nodeId}.`;
+    message = anyStarted ? `Running ${event.nodeId}.` : "Queued.";
   }
 
   const allNodes = [...byNodeId.values()];
@@ -260,6 +314,46 @@ async function ingestFindings(
   }
 }
 
+// Push a Temporal node snapshot into run_nodes during reconcile so a recovered run shows a complete
+// pipeline graph, not just a terminal run status.
+async function syncNodesFromTemporal(
+  pb: Awaited<ReturnType<typeof adminPb>>,
+  runRecordId: string,
+  nodes: WorkflowNodeStatus[],
+): Promise<void> {
+  for (const node of nodes) {
+    const fields = {
+      run: runRecordId,
+      nodeId: node.id,
+      label: node.label,
+      kind: node.kind,
+      state: node.state,
+      message: node.message ?? "",
+      queuedAt: node.queuedAt ?? "",
+      startedAt: node.startedAt ?? "",
+      finishedAt: node.finishedAt ?? "",
+      durationMs: node.durationMs ?? null,
+      findingCount: node.findingCount ?? 0,
+      severityCounts: node.severityCounts ?? {},
+      metrics: node.metrics ?? {},
+      findingsKeys: node.findingsKeys ?? [],
+      error: node.error ?? null,
+    };
+    try {
+      const existing = await pb
+        .collection("run_nodes")
+        .getFirstListItem(
+          pb.filter("run = {:r} && nodeId = {:n}", { r: runRecordId, n: node.id }),
+        );
+      await pb.collection("run_nodes").update(existing.id, fields);
+    } catch {
+      await pb
+        .collection("run_nodes")
+        .create({ ...fields, findingsIngested: false });
+    }
+  }
+}
+
 /**
  * Safety-net sweep (NOT a poll loop): for runs stuck RUNNING past a TTL with no recent event, do a
  * single Temporal reconcile to recover lost best-effort emits or infra-level workflow death.
@@ -275,7 +369,10 @@ export function startRunReconcile(intervalMs: number): { stop: () => void } {
     try {
       const pb = await adminPb();
       const staleMs = Number(process.env.RUN_STALE_MS ?? 600000);
-      const cutoff = new Date(Date.now() - staleMs);
+      // PocketBase datetime format is "YYYY-MM-DD HH:MM:SS.sssZ".
+      const cutoff = new Date(Date.now() - staleMs)
+        .toISOString()
+        .replace("T", " ");
       const stale = await pb.collection("runs").getList(1, 20, {
         filter: pb.filter("status = {:status} && updated < {:cutoff}", {
           status: "RUNNING",
@@ -287,9 +384,11 @@ export function startRunReconcile(intervalMs: number): { stop: () => void } {
         try {
           const status = await queryRunStatus(run.workflowId as string);
           if (status.state === "COMPLETED" || status.state === "FAILED") {
+            await syncNodesFromTemporal(pb, run.id, status.nodes ?? []);
             await pb.collection("runs").update(run.id, {
               status: status.state,
               message: status.message,
+              startedAt: status.startedAt ?? "",
               finishedAt: status.finishedAt ?? "",
               durationMs: status.durationMs ?? null,
             });
