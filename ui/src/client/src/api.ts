@@ -1,5 +1,17 @@
-const TOKEN_KEY = 'oversecured.ui.token';
+/// <reference types="vite/client" />
+import PocketBase from 'pocketbase';
+import type { RecordModel } from 'pocketbase';
 
+// ---------------------------------------------------------------------------
+// Shared PocketBase client — exported so Task 7 can attach realtime listeners
+// ---------------------------------------------------------------------------
+export const pb = new PocketBase(
+  import.meta.env.VITE_POCKETBASE_URL ?? 'http://localhost:8090'
+);
+
+// ---------------------------------------------------------------------------
+// Types (unchanged)
+// ---------------------------------------------------------------------------
 export type RunStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
 export type NodeState = RunStatus;
 export type Severity = 'ERROR' | 'WARNING' | 'NOTE' | 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | string;
@@ -20,6 +32,7 @@ export type Run = {
   apkFilename: string;
   apkSha256?: string;
   apkSizeBytes?: number;
+  artifactRoot?: string;
   status: RunStatus;
   message?: string | null;
   startedAt?: string | null;
@@ -85,23 +98,29 @@ export class ApiError extends Error {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Token helpers — delegated to PocketBase authStore
+// ---------------------------------------------------------------------------
+
+/** Returns the current PB auth token, or null if unauthenticated. */
 export function getToken(): string | null {
-  return window.localStorage.getItem(TOKEN_KEY);
+  return pb.authStore.token || null;
 }
 
-export function setToken(token: string): void {
-  window.localStorage.setItem(TOKEN_KEY, token);
+/** No-op: PocketBase manages its own authStore persistence. Kept for API compat. */
+export function setToken(_token: string): void {
+  // PocketBase persists its own authStore — no action needed.
 }
 
+/** Clears the PocketBase authStore (logs out). */
 export function clearToken(): void {
-  window.localStorage.removeItem(TOKEN_KEY);
+  pb.authStore.clear();
 }
 
-function authHeaders(): HeadersInit {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
+// ---------------------------------------------------------------------------
+// Fetch helper for backend endpoints that still require a bearer token
+// (uploadRun POSTs to /api/runs; getReport fetches blobs from /api/runs/…)
+// ---------------------------------------------------------------------------
 async function parseError(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: string; message?: string };
@@ -111,74 +130,168 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  Object.entries(authHeaders()).forEach(([key, value]) => headers.set(key, value));
-
-  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const response = await fetch(path, { ...init, headers });
-  if (!response.ok) {
-    throw new ApiError(response.status, await parseError(response));
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return (await response.json()) as T;
+function bearerHeaders(): HeadersInit {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// ---------------------------------------------------------------------------
+// Record → type mappers
+// ---------------------------------------------------------------------------
+
+function toUser(record: RecordModel): User {
+  return {
+    id: record.id,
+    email: record['email'] as string,
+  };
+}
+
+function toRun(record: RecordModel): Run {
+  return {
+    id: record.id,
+    workflowId: record['workflowId'] as string | undefined,
+    apkFilename: record['apkFilename'] as string,
+    apkSha256: record['apkSha256'] as string | undefined,
+    apkSizeBytes: record['apkSizeBytes'] as number | undefined,
+    artifactRoot: record['artifactRoot'] as string | undefined,
+    status: record['status'] as RunStatus,
+    message: (record['message'] as string | null | undefined) ?? null,
+    startedAt: (record['startedAt'] as string | null | undefined) || null,
+    finishedAt: (record['finishedAt'] as string | null | undefined) || null,
+    durationMs: (record['durationMs'] as number | null | undefined) ?? null,
+    reportHtmlKey: (record['reportHtmlKey'] as string | null | undefined) || null,
+    reportSarifKey: (record['reportSarifKey'] as string | null | undefined) || null,
+    createdAt: record.created,
+    updatedAt: record.updated,
+  };
+}
+
+function toNode(record: RecordModel): RunNode {
+  return {
+    id: record['nodeId'] as string,
+    label: record['label'] as string,
+    kind: record['kind'] as string,
+    state: record['state'] as NodeState,
+    message: (record['message'] as string | null | undefined) ?? null,
+    queuedAt: (record['queuedAt'] as string | null | undefined) || null,
+    startedAt: (record['startedAt'] as string | null | undefined) || null,
+    finishedAt: (record['finishedAt'] as string | null | undefined) || null,
+    durationMs: (record['durationMs'] as number | null | undefined) ?? null,
+    findingCount: (record['findingCount'] as number) ?? 0,
+    severityCounts: (record['severityCounts'] as Record<string, number>) ?? {},
+    metrics: (record['metrics'] as Record<string, unknown>) ?? {},
+    diagnostics: (record['diagnostics'] as Array<{ where?: string; detail: string }>) ?? [],
+    artifacts: (record['artifacts'] as Array<{ type: string; key: string }>) ?? [],
+    error: (record['error'] as { kind?: string; message: string } | null) ?? null,
+    findingsKeys: (record['findingsKeys'] as string[]) ?? [],
+    findingsIngested: record['findingsIngested'] as boolean | undefined,
+    updatedAt: record.updated,
+  };
+}
+
+function toFinding(record: RecordModel): Finding {
+  const raw = (record['rawJson'] as Record<string, unknown>) ?? {};
+  return {
+    id: record.id,
+    runId: record['run'] as string | undefined,
+    nodeId: (record['nodeId'] as string | null | undefined) ?? null,
+    analyzer: record['analyzer'] as string,
+    ruleId: (record['ruleId'] as string | null | undefined) ?? null,
+    vulnerabilityClass: (record['vulnerabilityClass'] as string | null | undefined) ?? null,
+    severity: record['severity'] as Severity,
+    message: record['message'] as string,
+    cwe: (record['cwe'] as string | null | undefined) ?? null,
+    owaspMobile: (record['owaspMobile'] as string | null | undefined) ?? null,
+    sourceFile: (record['sourceFile'] as string | null | undefined) ?? null,
+    sourceLine: (record['sourceLine'] as number | null | undefined) ?? null,
+    sinkFile: (record['sinkFile'] as string | null | undefined) ?? null,
+    sinkLine: (record['sinkLine'] as number | null | undefined) ?? null,
+    rawJson: raw,
+    verdict: (raw['verdict'] as string | null | undefined) ?? null,
+    confidence: (raw['confidence'] as number | null | undefined) ?? null,
+    fix: (raw['fix'] as string | null | undefined) ?? null,
+    createdAt: record.created,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// API surface (same exported names and signatures as before)
+// ---------------------------------------------------------------------------
 export const api = {
   async register(email: string, password: string): Promise<AuthResponse> {
-    return request<AuthResponse>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    });
+    await pb.collection('users').create({ email, password, passwordConfirm: password });
+    const result = await pb.collection('users').authWithPassword(email, password);
+    return {
+      token: pb.authStore.token,
+      user: toUser(result.record),
+    };
   },
 
   async login(email: string, password: string): Promise<AuthResponse> {
-    return request<AuthResponse>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    });
+    const result = await pb.collection('users').authWithPassword(email, password);
+    return {
+      token: pb.authStore.token,
+      user: toUser(result.record),
+    };
   },
 
   async me(): Promise<User> {
-    return request<User>('/auth/me');
+    if (pb.authStore.record) {
+      return toUser(pb.authStore.record);
+    }
+    const result = await pb.collection('users').authRefresh();
+    return toUser(result.record);
   },
 
+  /** Upload an APK — still goes to the backend REST API. */
   async uploadRun(apk: File): Promise<Run> {
     const body = new FormData();
     body.append('apk', apk);
-    return request<Run>('/api/runs', { method: 'POST', body });
+    const response = await fetch('/api/runs', {
+      method: 'POST',
+      headers: bearerHeaders(),
+      body,
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, await parseError(response));
+    }
+    return (await response.json()) as Run;
   },
 
   async listRuns(): Promise<Run[]> {
-    return request<Run[]>('/api/runs');
+    const records = await pb.collection('runs').getFullList({ sort: '-created' });
+    return records.map(toRun);
   },
 
   async getRun(id: string): Promise<Run> {
-    return request<Run>(`/api/runs/${encodeURIComponent(id)}`);
+    const record = await pb.collection('runs').getOne(id);
+    return toRun(record);
   },
 
   async getRunNodes(id: string): Promise<RunNode[]> {
-    return request<RunNode[]>(`/api/runs/${encodeURIComponent(id)}/nodes`);
+    const records = await pb.collection('run_nodes').getFullList({
+      filter: pb.filter('run = {:r}', { r: id }),
+      sort: 'created',
+    });
+    return records.map(toNode);
   },
 
   async getRunFindings(id: string): Promise<Finding[]> {
-    return request<Finding[]>(`/api/runs/${encodeURIComponent(id)}/findings`);
+    const records = await pb.collection('findings').getFullList({
+      filter: pb.filter('run = {:r}', { r: id }),
+      sort: 'created',
+    });
+    return records.map(toFinding);
   },
 
+  /** Download a report — still goes to the backend REST API. */
   async getReport(id: string, kind: 'html' | 'sarif' | 'ai-triage'): Promise<Blob> {
     const response = await fetch(`/api/runs/${encodeURIComponent(id)}/reports/${kind}`, {
-      headers: authHeaders()
+      headers: bearerHeaders(),
     });
     if (!response.ok) {
       throw new ApiError(response.status, await parseError(response));
     }
     return response.blob();
-  }
+  },
 };
