@@ -51,7 +51,10 @@ services:
     image: ghcr.io/muchobien/pocketbase:0.28.4
     restart: unless-stopped
     # Bind 0.0.0.0 so other containers/the browser can reach PB, and pin the data dir to the volume.
-    command: ["serve", "--http=0.0.0.0:8090", "--dir", "/pb_data", "--migrationsDir", "/pb_migrations"]
+    # NOTE: the image ENTRYPOINT is already `pocketbase serve --http=0.0.0.0:8090 --dir=/pb_data ...`.
+    # Pass ONLY extra flags here — a positional `serve` arg would be parsed as an autocert domain and
+    # flip PB into HTTPS-redirect mode on :443. Just add the migrations dir.
+    command: ["--migrationsDir", "/pb_migrations"]
     environment:
       PB_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL:?set POCKETBASE_ADMIN_EMAIL in .env.server}
       PB_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD:?set POCKETBASE_ADMIN_PASSWORD in .env.server}

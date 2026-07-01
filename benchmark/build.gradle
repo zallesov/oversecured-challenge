@@ -1,8 +1,0 @@
-plugins {
-    id 'application'
-}
-
-application {
-    mainClass = 'com.oversecured.sast.benchmark.BenchmarkApp'
-    applicationName = 'benchmark'
-}

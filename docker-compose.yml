@@ -35,7 +35,9 @@ services:
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:0.28.4
     # Bind 0.0.0.0 so other containers/the browser can reach PB, and pin the data dir to the volume.
-    command: ["serve", "--http=0.0.0.0:8090", "--dir", "/pb_data", "--migrationsDir", "/pb_migrations"]
+    # Image ENTRYPOINT is already `pocketbase serve --http=0.0.0.0:8090 --dir=/pb_data ...`; pass only
+    # extra flags. A positional `serve` here is parsed as an autocert domain and forces HTTPS on :443.
+    command: ["--migrationsDir", "/pb_migrations"]
     environment:
       # Dev defaults — documented, not secret
       PB_ADMIN_EMAIL: admin@example.com
