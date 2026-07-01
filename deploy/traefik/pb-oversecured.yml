@@ -1,0 +1,27 @@
+# Traefik file-provider route for the oversecured PocketBase.
+# Traefik on hermes runs on the host network and proxies domains to 127.0.0.1:<port>
+# (same model as the jobland stack's /docker/traefik/config/dynamic.yml).
+#
+# Install ONE of:
+#   A) If Traefik's file provider watches the CONFIG DIRECTORY (/docker/traefik/config/), drop this
+#      file there as `pb-oversecured.yml` — no edits to the shared dynamic.yml.
+#   B) If it watches only the single dynamic.yml, merge the `routers:` and `services:` entries below
+#      into that file (do NOT clobber the existing pocketbase/jobs/mcp entries).
+#
+# Requires: DNS A record pb-oversecured.zall.dev -> hermes IP, and PocketBase published on
+# 127.0.0.1:18090 (docker-compose.server.yml).
+http:
+  routers:
+    pb-oversecured:
+      rule: "Host(`pb-oversecured.zall.dev`)"
+      entrypoints:
+        - websecure
+      tls:
+        certresolver: letsencrypt
+      service: pb-oversecured
+
+  services:
+    pb-oversecured:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:18090"

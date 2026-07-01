@@ -56,7 +56,9 @@ services:
       PB_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL:?set POCKETBASE_ADMIN_EMAIL in .env.server}
       PB_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD:?set POCKETBASE_ADMIN_PASSWORD in .env.server}
     ports:
-      - "${POCKETBASE_PORT:-18090}:8090"
+      # Loopback only — Traefik (host network) is the public edge, proxying
+      # pb-oversecured.zall.dev -> 127.0.0.1:${POCKETBASE_PORT}. See deploy/traefik/pb-oversecured.yml.
+      - "127.0.0.1:${POCKETBASE_PORT:-18090}:8090"
     volumes:
       - pb-data:/pb_data
       - ./ui/pb_migrations:/pb_migrations:ro

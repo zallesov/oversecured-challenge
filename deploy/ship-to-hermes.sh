@@ -14,7 +14,7 @@ IMAGES=("oversecured-ui:${IMAGE_TAG}" "oversecured-worker:${IMAGE_TAG}")
 cd "$(dirname "$0")/.."   # repo root
 
 if [[ ! -f .env.server ]]; then
-  echo "ERROR: .env.server not found. cp .env.server.example .env.server and set JWT_SECRET." >&2
+  echo "ERROR: .env.server not found. cp .env.server.example .env.server and set POCKETBASE_ADMIN_PASSWORD + STATUS_CALLBACK_SECRET." >&2
   exit 1
 fi
 
@@ -35,6 +35,10 @@ ssh "$SSH_HOST" "mkdir -p ${REMOTE_DIR}"
 rsync -az --delete "$COMPOSE_FILE" .env.server "$SSH_HOST:${REMOTE_DIR}/"
 rsync -az --delete rules "$SSH_HOST:${REMOTE_DIR}/"
 rsync -az --delete test-subjects "$SSH_HOST:${REMOTE_DIR}/"
+# PocketBase migrations: the `pocketbase` service bind-mounts ./ui/pb_migrations, so it must exist on
+# the remote at the same relative path or PB boots with no collections.
+ssh "$SSH_HOST" "mkdir -p ${REMOTE_DIR}/ui"
+rsync -az --delete ui/pb_migrations "$SSH_HOST:${REMOTE_DIR}/ui/"
 
 echo "==> [4/6] Copy image bundle to remote"
 scp -q "$TMP/images.tar.gz" "$SSH_HOST:${REMOTE_DIR}/images.tar.gz"
